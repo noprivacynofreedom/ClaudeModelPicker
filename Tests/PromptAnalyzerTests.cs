@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Xunit;
 using ClaudeModelPicker.Services;
 using ClaudeModelPicker.Models;

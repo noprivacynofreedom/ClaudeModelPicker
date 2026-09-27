@@ -1,3 +1,4 @@
+using System;
 using System.Windows;
 using ClaudeModelPicker.Services;
 
@@ -7,6 +8,7 @@ namespace ClaudeModelPicker
     {
         private KeyboardHookService? _hookService;
         private ClaudeMonitorService? _monitorService;
+        private ConfigManager? _configManager;
 
         protected override void OnStartup(StartupEventArgs e)
         {
@@ -18,8 +20,10 @@ namespace ClaudeModelPicker
 
             try
             {
-                _monitorService = new ClaudeMonitorService();
-                _hookService = new KeyboardHookService(_monitorService);
+                _configManager = new ConfigManager();
+                _monitorService = new ClaudeMonitorService(_configManager);
+                _monitorService.Logger.CleanupOldLogs(_configManager.AppLogsToKeepDays);
+                _hookService = new KeyboardHookService(_monitorService, _configManager);
                 _hookService.Start();
             }
             catch (Exception ex)
@@ -32,6 +36,7 @@ namespace ClaudeModelPicker
         {
             _hookService?.Stop();
             _monitorService?.Dispose();
+            _configManager?.Dispose();
             base.OnExit(e);
         }
     }

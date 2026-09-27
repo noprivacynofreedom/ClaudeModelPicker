@@ -1,3 +1,5 @@
+using System;
+
 namespace ClaudeModelPicker.Models
 {
     public class ModelPickLog

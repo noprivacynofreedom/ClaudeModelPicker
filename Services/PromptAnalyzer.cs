@@ -1,43 +1,56 @@
 using SharpToken;
 using ClaudeModelPicker.Models;
-using System.Text.RegularExpressions;
+using System;
+using System.Linq;
 
 namespace ClaudeModelPicker.Services
 {
     public class PromptAnalyzer
     {
-        private static readonly string[] HaikuKeywords = { "summarize", "extract", "list", "fact", "code snippet", "quick", "simple" };
-        private static readonly string[] SonnetKeywords = { "analyze", "compare", "design", "debug", "complex", "explain", "reason", "architecture" };
+        // Used only if no ConfigManager is supplied (e.g. unit tests).
+        private static readonly string[] DefaultHaikuKeywords = { "summarize", "extract", "list", "fact", "code snippet", "quick", "simple" };
+        private static readonly string[] DefaultSonnetKeywords = { "analyze", "compare", "design", "debug", "complex", "explain", "reason", "architecture" };
+        private const int DefaultHaikuMaxTokens = 150;
+        private const int DefaultSonnetMinTokens = 300;
+
+        private readonly string[] _haikuKeywords;
+        private readonly string[] _sonnetKeywords;
+        private readonly int _haikuMaxTokens;
+        private readonly int _sonnetMinTokens;
+
+        public PromptAnalyzer(ConfigManager? config = null)
+        {
+            _haikuKeywords = config?.AnalysisHaikuKeywords is { Length: > 0 } hk ? hk : DefaultHaikuKeywords;
+            _sonnetKeywords = config?.AnalysisSonnetKeywords is { Length: > 0 } sk ? sk : DefaultSonnetKeywords;
+            _haikuMaxTokens = config?.AnalysisHaikuMaxTokens ?? DefaultHaikuMaxTokens;
+            _sonnetMinTokens = config?.AnalysisSonnetMinTokens ?? DefaultSonnetMinTokens;
+        }
 
         public ModelPick Analyze(string prompt)
         {
             try
             {
                 var tokenCount = CountTokens(prompt);
-                var hasSonnetKeywords = HasKeywords(prompt, SonnetKeywords);
-                var hasHaikuKeywords = HasKeywords(prompt, HaikuKeywords);
+                var hasSonnetKeywords = HasKeywords(prompt, _sonnetKeywords);
+                var hasHaikuKeywords = HasKeywords(prompt, _haikuKeywords);
 
-                // Scoring logic
                 double sonnetScore = 0;
                 double haikuScore = 0;
 
-                // Token count scoring
-                if (tokenCount < 150)
+                if (tokenCount < _haikuMaxTokens)
                     haikuScore += 0.4;
-                else if (tokenCount > 300)
+                else if (tokenCount > _sonnetMinTokens)
                     sonnetScore += 0.4;
 
-                // Keyword scoring
                 if (hasSonnetKeywords)
                     sonnetScore += 0.5;
                 if (hasHaikuKeywords)
                     haikuScore += 0.4;
 
-                // Normalize
                 var total = sonnetScore + haikuScore;
                 if (total == 0)
                 {
-                    return new ModelPick { PickedModel = "Haiku", Confidence = 0.5 };
+                    return new ModelPick { PickedModel = "Haiku", Confidence = 0.5, TokenCount = tokenCount };
                 }
 
                 sonnetScore /= total;
@@ -65,14 +78,12 @@ namespace ClaudeModelPicker.Services
         {
             try
             {
-                // Use cl100k_base encoding for Claude
                 var encoding = GptEncoding.GetEncoding("cl100k_base");
                 var tokens = encoding.Encode(text);
                 return tokens.Count;
             }
             catch
             {
-                // Fallback: rough estimate (1 token ≈ 4 chars)
                 return text.Length / 4;
             }
         }

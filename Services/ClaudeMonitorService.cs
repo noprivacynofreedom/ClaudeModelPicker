@@ -1,104 +1,46 @@
-using FlaUI.Core;
-using FlaUI.UIA3;
-using System.Diagnostics;
-using System.Windows;
 using ClaudeModelPicker.Models;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace ClaudeModelPicker.Services
 {
+    /// <summary>
+    /// Facade used by KeyboardHookService and App.xaml.cs. Internally this
+    /// composes: ConfigManager (settings), FileLogger (structured logging),
+    /// PromptAnalyzer (model pick logic), and InputMethodManager (clipboard
+    /// + keyboard nav, with FlaUI as an off-by-default fallback).
+    /// </summary>
     public class ClaudeMonitorService : IDisposable
     {
-        private readonly UIA3Automation _automation;
+        private readonly ConfigManager _config;
+        private readonly FileLogger _logger;
+        public FileLogger Logger => _logger;
+        private readonly FlaUIInputService _flaUi;
+        private readonly InputMethodManager _inputManager;
         private readonly PromptAnalyzer _analyzer;
         private List<ModelPickLog> _pickLog = new();
 
-        public ClaudeMonitorService()
+        public ClaudeMonitorService(ConfigManager? config = null, FileLogger? logger = null)
         {
-            _automation = new UIA3Automation();
-            _analyzer = new PromptAnalyzer();
+            _config = config ?? new ConfigManager();
+            _logger = logger ?? new FileLogger();
+            _flaUi = new FlaUIInputService();
+            _inputManager = new InputMethodManager(_config, _flaUi, _logger);
+            _analyzer = new PromptAnalyzer(_config);
         }
 
-        public string ReadClaudeInputField()
-        {
-            try
-            {
-                var claudeWindow = _automation.GetDesktop()
-                    .FindFirstByNameAndControlType("Claude", FlaUI.Core.Definitions.ControlType.Window);
-
-                if (claudeWindow == null)
-                    return string.Empty;
-
-                // Look for textarea or input field with user's prompt
-                var inputFields = claudeWindow.FindAllByControlType(FlaUI.Core.Definitions.ControlType.Edit);
-                if (inputFields.Length == 0)
-                    inputFields = claudeWindow.FindAllByControlType(FlaUI.Core.Definitions.ControlType.Text);
-
-                if (inputFields.Length == 0)
-                    return string.Empty;
-
-                // Last edit field is usually the current prompt
-                var lastField = inputFields.Last();
-                var text = lastField.AsTextBox()?.Text ?? string.Empty;
-
-                return text;
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Error reading input: {ex.Message}");
-                return string.Empty;
-            }
-        }
+        public string ReadClaudeInputField() => _inputManager.ReadPrompt();
 
         public ModelPick AnalyzePrompt(string prompt)
         {
-            return _analyzer.Analyze(prompt);
+            var pick = _analyzer.Analyze(prompt);
+            if (_config.LogEventAnalysis)
+                _logger.LogAnalysis(prompt, pick.PickedModel, pick.Confidence, pick.TokenCount);
+            return pick;
         }
 
-        public bool TryClickModelDropdown(string model)
-        {
-            try
-            {
-                var claudeWindow = _automation.GetDesktop()
-                    .FindFirstByNameAndControlType("Claude", FlaUI.Core.Definitions.ControlType.Window);
-
-                if (claudeWindow == null)
-                    return false;
-
-                // Find model selector dropdown (looks for button with current model name)
-                var buttons = claudeWindow.FindAllByControlType(FlaUI.Core.Definitions.ControlType.Button);
-                var modelButton = buttons.FirstOrDefault(b =>
-                    b.Name?.Contains("Haiku", StringComparison.OrdinalIgnoreCase) == true ||
-                    b.Name?.Contains("Sonnet", StringComparison.OrdinalIgnoreCase) == true ||
-                    b.Name?.Contains("Model", StringComparison.OrdinalIgnoreCase) == true);
-
-                if (modelButton == null)
-                    return false;
-
-                // Click dropdown to open
-                modelButton.Click();
-                Thread.Sleep(300);
-
-                // Find and click the target model in dropdown
-                var dropdownItems = claudeWindow.FindAllByControlType(FlaUI.Core.Definitions.ControlType.MenuItem);
-                var targetItem = dropdownItems.FirstOrDefault(item =>
-                    item.Name?.Contains(model, StringComparison.OrdinalIgnoreCase) == true);
-
-                if (targetItem == null)
-                {
-                    // Try clicking dropdown again to close it
-                    modelButton.Click();
-                    return false;
-                }
-
-                targetItem.Click();
-                return true;
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Error clicking dropdown: {ex.Message}");
-                return false;
-            }
-        }
+        public bool TryClickModelDropdown(string model) => _inputManager.SelectModel(model);
 
         public void ShowPopup(ModelPick pick)
         {
@@ -110,6 +52,8 @@ namespace ClaudeModelPicker.Services
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Error showing popup: {ex.Message}");
+                if (_config.LogEventErrors)
+                    _logger.LogError("ShowPopup", ex);
             }
         }
 
@@ -131,7 +75,8 @@ namespace ClaudeModelPicker.Services
 
         public void Dispose()
         {
-            _automation?.Dispose();
+            _flaUi.Dispose();
+            _logger.Dispose();
         }
     }
 }
