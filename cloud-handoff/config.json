@@ -1,0 +1,23 @@
+{
+  "$schema": "config.schema not published — keep this file flat, no nesting past one level, so ConfigManager stays simple",
+
+  "haikuKeywords": ["summarize", "extract", "list", "fact", "code snippet", "quick", "simple"],
+  "sonnetKeywords": ["analyze", "compare", "design", "debug", "complex", "explain", "reason", "architecture"],
+
+  "tokenThresholdLow": 150,
+  "tokenThresholdHigh": 300,
+
+  "tokenScoreWeight": 0.4,
+  "sonnetKeywordScoreWeight": 0.5,
+  "haikuKeywordScoreWeight": 0.4,
+
+  "autoClickConfidenceThreshold": 0.8,
+  "autoClickEnabled": false,
+
+  "modelSelectorTabStops": 3,
+
+  "enterThrottleMs": 500,
+
+  "logLevel": "Info",
+  "logRetentionDays": 30
+}
