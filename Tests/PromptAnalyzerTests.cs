@@ -52,13 +52,16 @@ namespace ClaudeModelPicker.Tests
         public void CountTokens_LongPrompt_ReturnsHighCount()
         {
             // Arrange
-            string prompt = new string('a', 1000); // 1000 characters
+            // NOTE: repeated identical characters (e.g. new string('a', 1000)) compress
+            // to very few BPE tokens and do not exercise this path. Use distinct words
+            // instead so the token count actually reflects prompt length.
+            string prompt = string.Join(" ", Enumerable.Range(1, 300).Select(i => $"uniqueword{i}"));
 
             // Act
             var result = _analyzer.Analyze(prompt);
 
             // Assert
-            Assert.True(result.TokenCount > 200, "1000 chars should be > 200 tokens");
+            Assert.True(result.TokenCount > 200, $"300 distinct words should be > 200 tokens, got {result.TokenCount}");
         }
 
         #endregion
@@ -132,8 +135,11 @@ namespace ClaudeModelPicker.Tests
         public void Analyze_HugePromptSonnetThreshold_PreferSonnet()
         {
             // Arrange
+            // NOTE: 100 short "wordN" tokens landed under the 300-token Sonnet
+            // threshold with the real tokenizer. Use enough distinct words to
+            // reliably clear DefaultSonnetMinTokens (300).
             string prompt = string.Join(" ",
-                Enumerable.Range(1, 100).Select(i => $"word{i}"));
+                Enumerable.Range(1, 400).Select(i => $"word{i}"));
 
             // Act
             var result = _analyzer.Analyze(prompt);

@@ -1,8 +1,8 @@
 using System;
-using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using FlaUI.Core;
+using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 using FlaUI.UIA3;
 
@@ -19,18 +19,24 @@ namespace ClaudeModelPicker.Services
     {
         private readonly UIA3Automation _automation = new();
 
+        private AutomationElement? FindClaudeWindow()
+        {
+            return _automation.GetDesktop()
+                .FindAllChildren(cf => cf.ByControlType(ControlType.Window))
+                .FirstOrDefault(w => w.Name == "Claude");
+        }
+
         public string ReadClaudeInputField()
         {
             try
             {
-                var claudeWindow = _automation.GetDesktop()
-                    .FindFirstByNameAndControlType("Claude", ControlType.Window);
+                var claudeWindow = FindClaudeWindow();
                 if (claudeWindow == null)
                     return string.Empty;
 
-                var inputFields = claudeWindow.FindAllByControlType(ControlType.Edit);
+                var inputFields = claudeWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.Edit));
                 if (inputFields.Length == 0)
-                    inputFields = claudeWindow.FindAllByControlType(ControlType.Text);
+                    inputFields = claudeWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.Text));
                 if (inputFields.Length == 0)
                     return string.Empty;
 
@@ -39,7 +45,7 @@ namespace ClaudeModelPicker.Services
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"FlaUI read failed: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"FlaUI read failed: {ex.Message}");
                 return string.Empty;
             }
         }
@@ -48,12 +54,11 @@ namespace ClaudeModelPicker.Services
         {
             try
             {
-                var claudeWindow = _automation.GetDesktop()
-                    .FindFirstByNameAndControlType("Claude", ControlType.Window);
+                var claudeWindow = FindClaudeWindow();
                 if (claudeWindow == null)
                     return false;
 
-                var buttons = claudeWindow.FindAllByControlType(ControlType.Button);
+                var buttons = claudeWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.Button));
                 var modelButton = buttons.FirstOrDefault(b =>
                     b.Name?.Contains("Haiku", StringComparison.OrdinalIgnoreCase) == true ||
                     b.Name?.Contains("Sonnet", StringComparison.OrdinalIgnoreCase) == true ||
@@ -64,7 +69,7 @@ namespace ClaudeModelPicker.Services
                 modelButton.Click();
                 Thread.Sleep(300);
 
-                var dropdownItems = claudeWindow.FindAllByControlType(ControlType.MenuItem);
+                var dropdownItems = claudeWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.MenuItem));
                 var targetItem = dropdownItems.FirstOrDefault(item =>
                     item.Name?.Contains(model, StringComparison.OrdinalIgnoreCase) == true);
 
@@ -79,7 +84,7 @@ namespace ClaudeModelPicker.Services
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"FlaUI dropdown click failed: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"FlaUI dropdown click failed: {ex.Message}");
                 return false;
             }
         }

@@ -10,6 +10,7 @@ namespace ClaudeModelPicker.Services
         private readonly ClaudeMonitorService _monitor;
         private readonly ConfigManager _config;
         private bool _isRunning;
+        private bool _shiftDown;
 
         public KeyboardHookService(ClaudeMonitorService monitor, ConfigManager? config = null)
         {
@@ -17,6 +18,7 @@ namespace ClaudeModelPicker.Services
             _config = config ?? new ConfigManager();
             _hook = new SimpleGlobalHook();
             _hook.KeyPressed += OnKeyPressed;
+            _hook.KeyReleased += OnKeyReleased;
         }
 
         public void Start()
@@ -47,15 +49,29 @@ namespace ClaudeModelPicker.Services
             }
         }
 
+        private void OnKeyReleased(object? sender, KeyboardHookEventArgs e)
+        {
+            if (e.Data.KeyCode == KeyCode.VcLeftShift || e.Data.KeyCode == KeyCode.VcRightShift)
+                _shiftDown = false;
+        }
+
         private void OnKeyPressed(object? sender, KeyboardHookEventArgs e)
         {
-            if (!_config.KeyboardGlobalHookEnabled) return;
-            if (!_config.KeyboardInterceptEnter) return;
+            if (e.Data.KeyCode == KeyCode.VcLeftShift || e.Data.KeyCode == KeyCode.VcRightShift)
+            {
+                _shiftDown = true;
+                return;
+            }
 
-            // NOTE: interceptShiftEnter (config.json) is not implemented — distinguishing
-            // Shift+Enter from plain Enter needs SharpHook 5.3.0's Shift KeyCode member,
-            // which wasn't verified against docs. Every Enter is intercepted for now.
-            if (e.Data.KeyCode != KeyCode.Return) return;
+            if (!_config.KeyboardGlobalHookEnabled) return;
+
+            var isEnter = e.Data.KeyCode == KeyCode.VcEnter || e.Data.KeyCode == KeyCode.VcNumPadEnter;
+            if (!isEnter) return;
+
+            var shouldIntercept = _shiftDown
+                ? _config.KeyboardInterceptShiftEnter
+                : _config.KeyboardInterceptEnter;
+            if (!shouldIntercept) return;
 
             try
             {
