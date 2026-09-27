@@ -1,0 +1,20 @@
+<Window x:Class="ClaudeModelPicker.ModelPickDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Model Recommendation" Height="200" Width="400"
+        WindowStartupLocation="CenterScreen"
+        Background="#F5F5F5"
+        FontFamily="Segoe UI"
+        Topmost="True">
+    <Grid Margin="20">
+        <StackPanel VerticalAlignment="Center">
+            <TextBlock x:Name="TitleText" FontSize="16" FontWeight="Bold" Margin="0,0,0,10" Foreground="#333" />
+            <TextBlock x:Name="ReasoningText" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,20" Foreground="#666" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="10">
+                <Button x:Name="HaikuButton" Content="Use Haiku" Padding="15,8" Click="OnHaikuClick" Background="#4CAF50" Foreground="White" />
+                <Button x:Name="SonnetButton" Content="Use Sonnet" Padding="15,8" Click="OnSonnetClick" Background="#2196F3" Foreground="White" />
+                <Button x:Name="SkipButton" Content="Skip" Padding="15,8" Click="OnSkipClick" Background="#999" Foreground="White" />
+            </StackPanel>
+        </StackPanel>
+    </Grid>
+</Window>
