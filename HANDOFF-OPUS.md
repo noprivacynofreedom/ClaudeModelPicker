@@ -1,131 +1,169 @@
-# Claude Model Picker — Handoff to Opus (Final Review & Validation)
+# OPUS HANDOFF — Architecture Review & Ship Decision
 
-**What this is:** A Windows app that hooks into Claude Desktop to auto-pick and switch AI models based on prompt analysis. This is post-Sonnet cleanup, so code should be solid.
-
-**Your role:** Final validation on architecture, safety, security, and production readiness.
-
----
-
-## **Architecture Review**
-
-### Questions to answer:
-1. **Is the keyboard hook design sound?**
-   - Global hook in Windows runs in a critical thread. Any blocking call freezes global input.
-   - Is the code async-first to prevent this?
-   - Are there deadlock risks?
-
-2. **UI Automation fragility:**
-   - FlaUI uses UIA (UI Automation), which works for native apps but Electron + React is risky.
-   - Has Sonnet added fallbacks (clipboard, keyboard nav)?
-   - If Claude Desktop updates, does this break silently or noisily?
-   - Is there a manual override (hotkey to pick model)?
-
-3. **Token counting accuracy:**
-   - Using `tiktoken` (OpenAI's tokenizer). Is this correct for Claude models?
-   - Verify: Haiku/Sonnet use same tokenization?
-   - What's the performance impact? Is it cached?
-
-4. **Model picking heuristics:**
-   - Current: <150 tokens → Haiku, >300 → Sonnet, keywords weighted
-   - Is this reasonable? Should there be more nuance (task type, user tier)?
-   - Are thresholds configurable?
+## Pre-Read
+1. Read `SECURITY-AUDIT.md` (findings section)
+2. Read `HANDOFF-SONNET.md` (what Sonnet fixed)
+3. Read Sonnet's updated code (security mitigations should be in place)
 
 ---
 
-## **Security & Privacy**
+## Your Task: Architecture Review + Ship/No-Ship Decision
 
-### Critical checks:
-- ⚠️ **Admin privileges:** Global keyboard hook needs admin. Document this clearly.
-- ⚠️ **Prompt logging:** App logs prompts (first 100 chars). Is this safe?
-  - Could expose API keys, secrets, private info?
-  - Should logging be opt-in? Encrypted? Rate-limited?
-  - Where are logs stored? Accessible to other users?
-- ⚠️ **UI Automation attacks:** Could another app abuse the hook to click malicious UI?
-  - Are we vulnerable to privilege escalation?
-- ⚠️ **Dependencies:** Check tiktoken-net, SharpHook for known CVEs.
+**Time estimate:** 2-4 hours  
+**Deliverable:** `OPUS-REVIEW.md` (architecture assessment) + ship decision
 
----
+### What Sonnet Did
+- Fixed build issues (dependencies, XAML syntax)
+- Replaced FlaUI with clipboard + keyboard navigation
+- Added structured file logging
+- Added JSON config system
+- Refactored into smaller services
+- Added unit test templates
+- Implemented security mitigations (prompt sanitization, focus verification)
 
-## **Stability & Reliability**
-
-### Things that can go wrong:
-1. **Claude Desktop updates:** UI selectors change → auto-click fails silently. How do we surface this?
-2. **Admin prompt:** Windows may ask for elevation. Does the app handle this gracefully?
-3. **Hook unregisters:** System could forcibly remove global hook. Does app recover?
-4. **Rapid Enter presses:** Does queueing/throttling prevent chaos?
-5. **No Claude Desktop running:** App should just be a no-op, not crash.
-6. **Slow model pick (tiktoken first-run):** Does user experience a UI freeze?
-
-**Questions:**
-- Are there tests for all failure modes?
-- Does the app log enough to debug issues remotely?
-- Is there a safe mode / fallback mechanism?
+### Your Job
+Review the **integrated app** holistically:
+1. Is architecture sound for production?
+2. Are security mitigations complete?
+3. Are there design flaws or missed edge cases?
+4. Is this ready to ship or does it need work?
 
 ---
 
-## **Feature Completeness**
+## Architecture Review Checklist
 
-### Expected by user:
-- ✅ Auto-picks model on Enter
-- ✅ Shows recommendation popup if uncertain
-- ✅ Tracks usage history
-- ⚠️ **Dashboard (not in v1):** User might expect to see stats, usage trends. Is this in scope?
-- ⚠️ **Tray icon:** App needs visual feedback it's running. Does it have one?
-- ⚠️ **Settings:** Can users tune thresholds, or is it hardcoded?
+### Layers & Responsibilities
 
-**Ask Sonnet:** What's actually implemented vs. what's left for v2?
+- [ ] **Keyboard Hook Layer** (KeyboardHookService)
+  - Intercepts Enter, doesn't block other apps
+  - Throttling prevents rapid-fire events
+  - Thread-safe (uses lock or concurrent collection)
+
+- [ ] **Input Reading Layer** (ClipboardInputReader, fallback to FlaUI)
+  - Tries clipboard first, falls back gracefully
+  - Handles empty input correctly (no hang or crash)
+  - Restores clipboard state (or config skips it)
+
+- [ ] **Analysis Layer** (PromptAnalyzer)
+  - Token counting works (or gracefully estimates)
+  - Keywords loaded from config (not hardcoded)
+  - Confidence scoring is deterministic
+  - Edge cases handled (empty, huge, special chars)
+
+- [ ] **Model Selection Layer** (KeyboardModelSelector, fallback to FlaUI)
+  - Verifies focus before sending keys
+  - Retries on failure (keyboard nav, then FlaUI, then popup)
+  - Times out gracefully (doesn't hang forever)
+  - Logs which method succeeded (for debugging)
+
+- [ ] **UI Layer** (ModelPickDialog, tray icon)
+  - Popup shows recommendation clearly
+  - Auto-accept on high confidence (configurable)
+  - Timeout resets if user interacts (they control the flow)
+  - Dismiss doesn't break subsequent picks
+
+- [ ] **Persistence Layer** (FileLogger, Config)
+  - Logs to dated files with rotation
+  - Config hot-reloads on save
+  - No crashes on missing config (uses defaults)
+  - Prompts sanitized before logging
+
+### Dependency Injection & Testability
+
+- [ ] Services accept dependencies via constructor
+- [ ] No static dependencies (hard to mock/test)
+- [ ] Logging passed to services (not hardcoded Debug.WriteLine)
+- [ ] Tests can swap real services for mocks
+
+### Error Handling
+
+- [ ] Every async/hook operation has try-catch
+- [ ] Errors logged with context (what failed, why)
+- [ ] Graceful fallbacks (clipboard → FlaUI → popup)
+- [ ] User-facing errors are clear (not dev jargon)
+- [ ] No silent failures (at least Debug.WriteLine)
+
+### Performance & Threading
+
+- [ ] Keyboard hook doesn't block Claude Desktop
+- [ ] Input reading doesn't freeze UI (<100ms)
+- [ ] Analysis completes quickly (<500ms)
+- [ ] FileLogger is async or uses background thread
+- [ ] ConfigManager watch doesn't spam reloads
+
+### Configuration
+
+- [ ] config.json has all tuneable values
+- [ ] Defaults are sensible
+- [ ] Secrets (if any) NOT in config.json
+- [ ] Config keys match code (no typos)
+- [ ] Examples provided (config.json is self-documenting)
 
 ---
 
-## **Performance**
+## Security Review (From SECURITY-AUDIT.md)
 
-- First `tiktoken` load: how long? (tens of ms? seconds?)
-- FlaUI window finding: cached or fresh each time?
-- Any memory leaks in the global hook or UI searches?
-- Long-running test: does app stay stable after 1000 picks?
+### Critical (Fix before ship)
+- [ ] **Credential Leakage:** Prompts are sanitized (no API keys logged)
+  - Verify: `PromptAnalyzer.SanitizePrompt()` removes patterns
+  - Test: Log a prompt with "password=abc123", verify it's redacted
+  
+- [ ] **Focus Verification:** Keyboard navigation checks Claude is focused
+  - Verify: `KeyboardModelSelector.SelectModelViaKeyboard()` calls `VerifyFocus()`
+  - Test: Click email client, run selector, verify it doesn't type there
 
----
+### Important (Fix if time)
+- [ ] **Admin Privilege Warning:** App warns if running without admin
+  - Verify: Startup code checks `IsAdmin()` and shows MessageBox
+  - Test: Run as user, see warning; run as admin, proceed
+  
+- [ ] **Clipboard Restoration:** Logic is safe (doesn't corrupt)
+  - Verify: `ClipboardInputReader.ReadPromptViaClipboard()` handles exceptions
+  - Test: Have something in clipboard, call read, verify clipboard unchanged
 
-## **Code Quality Checklist**
+- [ ] **Config Validation:** Invalid config doesn't crash app
+  - Verify: `ConfigManager.Load()` has ValidateConfig() with try-catch
+  - Test: Edit config.json with invalid JSON, run app
 
-- [ ] All public methods have XML doc comments
-- [ ] No hard-coded thresholds (all in config)
-- [ ] Async-first design (no blocking in hook)
-- [ ] Structured logging (not just Debug.WriteLine)
-- [ ] Unit tests for logic (PromptAnalyzer)
-- [ ] Integration tests for UI automation (or at least documented edge cases)
-- [ ] No secrets in code (API keys, tokens, paths)
-- [ ] Proper exception handling (no silent failures)
-- [ ] Readme with setup, troubleshooting, logs location
-
----
-
-## **Sign-Off Questions**
-
-Before ship, Opus should affirm:
-
-1. **Is the architecture sound for this problem?**
-   - Or should we pivot to a different approach (e.g., Claude API proxy, browser extension only)?
-
-2. **Are the security implications acceptable?**
-   - Admin rights, prompt logging, global hook—are these risks documented and mitigated?
-
-3. **Is the reliability acceptable for a daily-use tool?**
-   - What's the failure mode? (Graceful no-op, or crash?)
-
-4. **Is the code ready for handoff to a maintainer?**
-   - Can someone else pick this up, understand it, and fix bugs?
+### Nice to Have
+- [ ] **Dependency Audit:** NuGet packages are up-to-date and maintained
+  - Verify: Run `dotnet outdated` (or manual check) for vulnerabilities
+  - Note: `tiktoken-net` is third-party (estimate, not official)
 
 ---
 
-## **Deliverable**
+## Ship Decision
 
-A short **OPUS-REVIEW.md** with:
-- ✅/⚠️/❌ on each major area (architecture, security, stability, code quality)
-- Top 3 risks and mitigations
-- Recommended next steps (ship v1, fix X before ship, pivot approach, etc)
-- Sign-off: "Ready for production" or "Needs work: [list]"
+### Ship if:
+- ✅ Builds without errors
+- ✅ Compiles to .exe (no runtime errors)
+- ✅ Keyboard hook fires and reads prompt (or gracefully falls back)
+- ✅ Model selection works (keyboard nav or FlaUI)
+- ✅ Security P1 mitigations in place (sanitized logs, focus check)
+- ✅ Tested on real Claude Desktop (not just compilation)
+- ✅ Error handling is robust (no crashes on edge cases)
+- ✅ Documentation is clear (user can install & run)
+
+### No-Ship / Needs Work if:
+- ❌ Hook never fires (keyboard input not intercepted)
+- ❌ Input reading fails consistently (clipboard + FlaUI both broken)
+- ❌ Credentials leaked in logs (sanitization missing or broken)
+- ❌ Crashes on unicode/long prompts (crashes, not fallback)
+- ❌ UI is confusing (user doesn't understand model pick)
+- ❌ No way to disable/uninstall cleanly
+- ❌ Admin requirement not documented
 
 ---
 
-**Tone:** You're the architect. If something feels off, push back. This tool runs with admin rights and reads user prompts—it has to be trustworthy.
+## Final Checklist Before Shipping
+
+- [ ] All P1 security issues fixed
+- [ ] Build passes clean
+- [ ] Tested on real Claude Desktop
+- [ ] Logs created and sanitized
+- [ ] Config works and validates
+- [ ] Tests pass
+- [ ] Documentation complete
+- [ ] README updated with security notes
+- [ ] Version number bumped (e.g., 0.1.0)
+
