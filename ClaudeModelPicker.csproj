@@ -4,6 +4,10 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- Needed for System.Windows.Forms.Clipboard/SendKeys (ClipboardInputReader,
+         KeyboardModelSelector) and NotifyIcon (App.xaml.cs tray icon). WPF
+         does not pull this in by default. -->
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
@@ -16,9 +20,19 @@
     <PackageReference Include="SharpHook" Version="5.3.0" />
     <PackageReference Include="FlaUI.Core" Version="4.0.0" />
     <PackageReference Include="FlaUI.UIA3" Version="4.0.0" />
-    <PackageReference Include="tiktoken-net" Version="1.0.6" />
+    <PackageReference Include="SharpToken" Version="2.0.1" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="System.Management" Version="5.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Ship config.json next to the .exe. Without this, ConfigManager finds
+         nothing at AppContext.BaseDirectory on a fresh install/clone and the
+         app fails at startup (see ConfigManager's fallback-to-defaults fix
+         for the other half of this issue). -->
+    <None Include="config.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>

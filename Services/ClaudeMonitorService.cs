@@ -1,24 +1,38 @@
 using FlaUI.Core;
 using FlaUI.UIA3;
-using System.Diagnostics;
-using System.Windows;
-using ClaudeModelPicker.Models;
+using System;
 
 namespace ClaudeModelPicker.Services
 {
+    /// <summary>
+    /// Legacy FlaUI (UI Automation) reader/clicker for Claude Desktop.
+    ///
+    /// Kept as a fallback behind <see cref="InputMethodManager"/>, not as the
+    /// primary path. Claude Desktop is Electron, and Electron apps commonly
+    /// expose a thin accessibility tree — a generic "Document"/"Pane" node
+    /// rather than named Edit/Button controls — unless the app's developers
+    /// added ARIA labels. Whether these selectors actually find anything on
+    /// the real app is UNVERIFIED (needs a Windows machine with Claude
+    /// Desktop running; see HANDOFF-OPUS.md). The clipboard/keyboard-nav
+    /// path in InputMethodManager is the one expected to actually work.
+    /// </summary>
     public class ClaudeMonitorService : IDisposable
     {
         private readonly UIA3Automation _automation;
-        private readonly PromptAnalyzer _analyzer;
-        private List<ModelPickLog> _pickLog = new();
+        private readonly FileLogger? _logger;
 
-        public ClaudeMonitorService()
+        public ClaudeMonitorService(FileLogger? logger = null)
         {
             _automation = new UIA3Automation();
-            _analyzer = new PromptAnalyzer();
+            _logger = logger;
         }
 
-        public string ReadClaudeInputField()
+        /// <summary>
+        /// Attempts to read the current prompt text via UI Automation.
+        /// Returns empty string if the Claude window, or any input control
+        /// inside it, cannot be found.
+        /// </summary>
+        public string ReadClaudeInputFieldViaFlaUI()
         {
             try
             {
@@ -28,7 +42,6 @@ namespace ClaudeModelPicker.Services
                 if (claudeWindow == null)
                     return string.Empty;
 
-                // Look for textarea or input field with user's prompt
                 var inputFields = claudeWindow.FindAllByControlType(FlaUI.Core.Definitions.ControlType.Edit);
                 if (inputFields.Length == 0)
                     inputFields = claudeWindow.FindAllByControlType(FlaUI.Core.Definitions.ControlType.Text);
@@ -36,25 +49,22 @@ namespace ClaudeModelPicker.Services
                 if (inputFields.Length == 0)
                     return string.Empty;
 
-                // Last edit field is usually the current prompt
-                var lastField = inputFields.Last();
-                var text = lastField.AsTextBox()?.Text ?? string.Empty;
-
-                return text;
+                var lastField = inputFields[^1];
+                return lastField.AsTextBox()?.Text ?? string.Empty;
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Error reading input: {ex.Message}");
+                _logger?.LogError("ClaudeMonitorService.ReadClaudeInputFieldViaFlaUI", ex);
                 return string.Empty;
             }
         }
 
-        public ModelPick AnalyzePrompt(string prompt)
-        {
-            return _analyzer.Analyze(prompt);
-        }
-
-        public bool TryClickModelDropdown(string model)
+        /// <summary>
+        /// Attempts to click the given model in Claude Desktop's model
+        /// selector dropdown via UI Automation. Returns false if the button
+        /// or the target menu item cannot be found.
+        /// </summary>
+        public bool TryClickModelDropdownViaFlaUI(string model)
         {
             try
             {
@@ -64,9 +74,8 @@ namespace ClaudeModelPicker.Services
                 if (claudeWindow == null)
                     return false;
 
-                // Find model selector dropdown (looks for button with current model name)
                 var buttons = claudeWindow.FindAllByControlType(FlaUI.Core.Definitions.ControlType.Button);
-                var modelButton = buttons.FirstOrDefault(b =>
+                var modelButton = Array.Find(buttons, b =>
                     b.Name?.Contains("Haiku", StringComparison.OrdinalIgnoreCase) == true ||
                     b.Name?.Contains("Sonnet", StringComparison.OrdinalIgnoreCase) == true ||
                     b.Name?.Contains("Model", StringComparison.OrdinalIgnoreCase) == true);
@@ -74,19 +83,16 @@ namespace ClaudeModelPicker.Services
                 if (modelButton == null)
                     return false;
 
-                // Click dropdown to open
                 modelButton.Click();
-                Thread.Sleep(300);
+                System.Threading.Thread.Sleep(300);
 
-                // Find and click the target model in dropdown
                 var dropdownItems = claudeWindow.FindAllByControlType(FlaUI.Core.Definitions.ControlType.MenuItem);
-                var targetItem = dropdownItems.FirstOrDefault(item =>
+                var targetItem = Array.Find(dropdownItems, item =>
                     item.Name?.Contains(model, StringComparison.OrdinalIgnoreCase) == true);
 
                 if (targetItem == null)
                 {
-                    // Try clicking dropdown again to close it
-                    modelButton.Click();
+                    modelButton.Click(); // best-effort: close the dropdown we opened
                     return false;
                 }
 
@@ -95,39 +101,10 @@ namespace ClaudeModelPicker.Services
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Error clicking dropdown: {ex.Message}");
+                _logger?.LogError("ClaudeMonitorService.TryClickModelDropdownViaFlaUI", ex);
                 return false;
             }
         }
-
-        public void ShowPopup(ModelPick pick)
-        {
-            try
-            {
-                var dialog = new ModelPickDialog(pick);
-                dialog.ShowDialog();
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Error showing popup: {ex.Message}");
-            }
-        }
-
-        public void LogModelPick(string prompt, ModelPick pick)
-        {
-            _pickLog.Add(new ModelPickLog
-            {
-                Timestamp = DateTime.Now,
-                Prompt = prompt.Substring(0, Math.Min(100, prompt.Length)),
-                PickedModel = pick.PickedModel,
-                Confidence = pick.Confidence
-            });
-
-            if (_pickLog.Count > 1000)
-                _pickLog = _pickLog.TakeLast(1000).ToList();
-        }
-
-        public List<ModelPickLog> GetPickHistory() => _pickLog;
 
         public void Dispose()
         {

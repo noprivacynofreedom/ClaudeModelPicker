@@ -14,7 +14,12 @@ namespace ClaudeModelPicker.Tests
     /// </summary>
     public class PromptAnalyzerTests
     {
-        private readonly PromptAnalyzer _analyzer = new PromptAnalyzer();
+        // PromptAnalyzer now takes ConfigManager (keywords/thresholds moved out
+        // of hardcoded arrays into config.json — see Services/ConfigManager.cs).
+        // ConfigManager.Load() falls back to built-in defaults when no
+        // config.json is found next to the test assembly, so these tests run
+        // the same regardless of test-runner working directory.
+        private readonly PromptAnalyzer _analyzer = new PromptAnalyzer(new ConfigManager());
 
         #region Token Counting Tests
 

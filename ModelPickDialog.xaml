@@ -10,9 +10,9 @@
         <StackPanel VerticalAlignment="Center">
             <TextBlock x:Name="TitleText" FontSize="16" FontWeight="Bold" Margin="0,0,0,10" Foreground="#333" />
             <TextBlock x:Name="ReasoningText" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,20" Foreground="#666" />
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="10">
-                <Button x:Name="HaikuButton" Content="Use Haiku" Padding="15,8" Click="OnHaikuClick" Background="#4CAF50" Foreground="White" />
-                <Button x:Name="SonnetButton" Content="Use Sonnet" Padding="15,8" Click="OnSonnetClick" Background="#2196F3" Foreground="White" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                <Button x:Name="HaikuButton" Content="Use Haiku" Padding="15,8" Margin="0,0,10,0" Click="OnHaikuClick" Background="#4CAF50" Foreground="White" />
+                <Button x:Name="SonnetButton" Content="Use Sonnet" Padding="15,8" Margin="0,0,10,0" Click="OnSonnetClick" Background="#2196F3" Foreground="White" />
                 <Button x:Name="SkipButton" Content="Skip" Padding="15,8" Click="OnSkipClick" Background="#999" Foreground="White" />
             </StackPanel>
         </StackPanel>

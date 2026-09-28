@@ -1,6 +1,7 @@
 using Newtonsoft.Json.Linq;
 using System;
 using System.IO;
+using System.Linq;
 
 namespace ClaudeModelPicker.Services
 {
@@ -8,42 +9,55 @@ namespace ClaudeModelPicker.Services
     /// Loads and manages application configuration from config.json.
     /// Supports hot-reloading on file changes.
     /// </summary>
-    public class ConfigManager
+    public class ConfigManager : IDisposable
     {
         private readonly string _configPath;
         private JObject _config;
-        private FileSystemWatcher _watcher;
+        private FileSystemWatcher? _watcher;
 
         public event EventHandler ConfigReloaded;
 
         public ConfigManager(string configFileName = "config.json")
         {
             _configPath = Path.Combine(AppContext.BaseDirectory, configFileName);
-
-            if (!File.Exists(_configPath))
-            {
-                throw new FileNotFoundException($"Config file not found: {_configPath}");
-            }
+            _config = new JObject(); // never null, even if Load() below fails entirely
 
             Load();
             WatchConfigFile();
         }
 
         /// <summary>
-        /// Load or reload configuration from disk.
+        /// Load or reload configuration from disk. Never throws: a missing or
+        /// malformed config.json falls back to an empty JObject, and every
+        /// Get*() accessor already has its own default, so the app runs with
+        /// built-in defaults rather than crashing at startup. This was the
+        /// single biggest ship blocker in the original version — a missing
+        /// config.json (e.g. a fresh clone before the .csproj was fixed to
+        /// copy it to the output directory) took down the whole app.
         /// </summary>
         public void Load()
         {
             try
             {
+                if (!File.Exists(_configPath))
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"Config file not found at {_configPath}; using built-in defaults.");
+                    _config = new JObject();
+                    return;
+                }
+
                 var json = File.ReadAllText(_configPath);
                 _config = JObject.Parse(json);
                 System.Diagnostics.Debug.WriteLine("Config loaded successfully");
             }
             catch (Exception ex)
             {
+                // Malformed JSON, locked file, etc. — fall back to defaults
+                // rather than propagate. Config is a convenience, not a
+                // dependency the app should die over.
                 System.Diagnostics.Debug.WriteLine($"Config load error: {ex.Message}");
-                throw;
+                _config = new JObject();
             }
         }
 
@@ -88,6 +102,8 @@ namespace ClaudeModelPicker.Services
         }
 
         public double AnalysisConfidenceThreshold => GetDouble("analysis.confidenceThreshold", 0.6);
+        public double AnalysisTokenCountWeight => GetDouble("analysis.scoringWeights.tokenCount", 0.4);
+        public double AnalysisKeywordsWeight => GetDouble("analysis.scoringWeights.keywords", 0.5);
 
         // Model selection
         public int ModelSelectionThrottleMs => GetInt("modelSelection.throttleMs", 500);

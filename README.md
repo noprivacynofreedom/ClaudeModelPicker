@@ -166,4 +166,8 @@ Proprietary. Built for Jason's Claude workflow.
 
 ---
 
-**Status:** v0.1 (pre-alpha, awaiting Haiku test results)
+**Status:** v0.2 (pre-alpha). Build blockers fixed and the architecture is
+wired together (clipboard read, keyboard-nav select, config-driven
+analysis, file logging, throttled async hook, tray icon). None of it has
+been run against a real Claude Desktop — see HANDOFF-OPUS.md for exactly
+what's verified vs. still a guess.

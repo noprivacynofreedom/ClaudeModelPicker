@@ -1,169 +1,144 @@
 # OPUS HANDOFF — Architecture Review & Ship Decision
 
-## Pre-Read
-1. Read `SECURITY-AUDIT.md` (findings section)
-2. Read `HANDOFF-SONNET.md` (what Sonnet fixed)
-3. Read Sonnet's updated code (security mitigations should be in place)
+## First thing to do, before reading anything else
+
+**This code has never been built or run.** This session (Sonnet, cloud,
+Linux container) has no Windows machine and no .NET SDK — `dotnet build`
+was never executed against this project. Every fix below was made by
+reading the code and reasoning about it, not by compiling it.
+
+So step 1 is not architecture review — it's: **ask Jason to run
+`dotnet build -c Release` on his own machine and paste back whatever
+errors come out.** Per his stated preference, don't try to drive his PC to
+test this yourself; ask him to run it and report. Everything past this
+point assumes that comes back clean or close to it.
 
 ---
 
-## Your Task: Architecture Review + Ship/No-Ship Decision
+## What was actually fixed this session (Sonnet)
 
-**Time estimate:** 2-4 hours  
-**Deliverable:** `OPUS-REVIEW.md` (architecture assessment) + ship decision
+Starting point: two build blockers (documented in HANDOFF-SONNET.md
+Priority 1), and cloud-research artifacts (`Services/ConfigManager.cs`,
+`Services/FileLogger.cs`, `config.json`, `Tests/PromptAnalyzerTests.cs`,
+`SECURITY-AUDIT.md`, `RESEARCH-InputMethods.md`) that existed as files but
+were never wired into the app — `ClaudeMonitorService`,
+`KeyboardHookService`, and `PromptAnalyzer` still had the original
+hardcoded, FlaUI-only, synchronous code.
 
-### What Sonnet Did
-- Fixed build issues (dependencies, XAML syntax)
-- Replaced FlaUI with clipboard + keyboard navigation
-- Added structured file logging
-- Added JSON config system
-- Refactored into smaller services
-- Added unit test templates
-- Implemented security mitigations (prompt sanitization, focus verification)
+### Build blockers
+- `.csproj`: `tiktoken-net` → `SharpToken 2.0.1` (code already imported
+  `SharpToken`; the package reference never matched)
+- `ModelPickDialog.xaml`: `StackPanel.Spacing="10"` removed — that
+  property doesn't exist on WPF's `StackPanel` (it's a WinUI/Avalonia
+  thing), replaced with per-button `Margin`
+- `Services/FileLogger.cs` and `Services/ConfigManager.cs` (added by the
+  cloud-research session) were missing `using System.Linq;` /
+  `using System.Collections.Generic;` — would not have compiled as
+  dropped in
+- `.csproj` was missing `<UseWindowsForms>true</UseWindowsForms>` —
+  needed for `Clipboard`, `SendKeys`, and `NotifyIcon`, none of which
+  work in a plain WPF project without it
 
-### Your Job
-Review the **integrated app** holistically:
-1. Is architecture sound for production?
-2. Are security mitigations complete?
-3. Are there design flaws or missed edge cases?
-4. Is this ready to ship or does it need work?
+### A real ship-blocking bug found while wiring things together
+`ConfigManager`'s constructor threw `FileNotFoundException` if
+`config.json` wasn't sitting next to the `.exe` at
+`AppContext.BaseDirectory` — and the `.csproj` never copied `config.json`
+there. On a fresh clone + build, the app would have thrown on line 1 of
+`App.xaml.cs`'s startup and shown nothing but an error MessageBox. Fixed
+two ways: `.csproj` now copies `config.json` to the output directory, and
+`ConfigManager.Load()` falls back to an empty config (→ built-in defaults
+via each `Get*()` accessor) instead of throwing, so a missing or corrupt
+config.json degrades gracefully instead of killing the app.
 
----
+### Actually wired the fallback chain (this didn't exist before)
+`RESEARCH-InputMethods.md` had sketched `ClipboardInputReader` and
+`KeyboardModelSelector` as ideas; neither existed as a file, and nothing
+called them. Built:
+- `Services/ClipboardInputReader.cs` — Ctrl+A/Ctrl+C/read/restore, with
+  clipboard-lock retry
+- `Services/KeyboardModelSelector.cs` — Tab/arrow/Enter navigation, **with
+  a foreground-window check before sending any keystrokes** (P1 item from
+  SECURITY-AUDIT.md "Keyboard nav focus issue" — previously nothing
+  verified Claude Desktop was even the focused window before blindly
+  sending Tab/Enter/Arrow keys system-wide)
+- `Services/InputMethodManager.cs` — coordinates clipboard → FlaUI for
+  reading, keyboard-nav → FlaUI for selecting, respecting the
+  `enabled`/`disabled` flags already in `config.json`
+- `Services/ClaudeMonitorService.cs` — trimmed down to just the FlaUI
+  fallback methods (renamed `ReadClaudeInputFieldViaFlaUI` /
+  `TryClickModelDropdownViaFlaUI` so it's clear they're the legacy path,
+  not the primary one)
 
-## Architecture Review Checklist
+### Async + throttle (HANDOFF-SONNET.md Priority 3, previously not done)
+`KeyboardHookService` used to do clipboard/UI reads, analysis, and popup
+display synchronously on the global hook's own thread — any slowness there
+would have frozen keyboard input system-wide. Now: the hook callback does
+only a throttle check (`config.json` → `modelSelection.throttleMs`) and
+hands off to `Task.Run`; the popup dialog is marshaled back to the UI
+thread via `Dispatcher.Invoke` since WPF windows can't show from a
+background thread.
 
-### Layers & Responsibilities
+### Config actually drives behavior now
+`PromptAnalyzer` used hardcoded keyword arrays and thresholds; now reads
+them from `ConfigManager` (which reads `config.json`). Also added
+`PromptAnalyzer.SanitizePrompt()` (P1 from SECURITY-AUDIT.md finding #1 —
+prompt text is now regex-scrubbed for key/token/password-shaped strings
+*before* it's ever written to the log file, not after).
 
-- [ ] **Keyboard Hook Layer** (KeyboardHookService)
-  - Intercepts Enter, doesn't block other apps
-  - Throttling prevents rapid-fire events
-  - Thread-safe (uses lock or concurrent collection)
+### Admin-privilege warning + tray icon
+Neither existed. `App.xaml.cs` now checks `WindowsPrincipal.IsInRole(Administrator)`
+at startup and shows a one-time MessageBox if not elevated (SECURITY-AUDIT.md
+flagged this as "needs documenting" — a non-admin install would otherwise
+silently never intercept anything, with no clue why). A minimal
+`NotifyIcon` + right-click Exit was added — previously "runs as background
+tray app" was asserted in the README but `MainWindow` just hid itself with
+no tray presence at all.
 
-- [ ] **Input Reading Layer** (ClipboardInputReader, fallback to FlaUI)
-  - Tries clipboard first, falls back gracefully
-  - Handles empty input correctly (no hang or crash)
-  - Restores clipboard state (or config skips it)
-
-- [ ] **Analysis Layer** (PromptAnalyzer)
-  - Token counting works (or gracefully estimates)
-  - Keywords loaded from config (not hardcoded)
-  - Confidence scoring is deterministic
-  - Edge cases handled (empty, huge, special chars)
-
-- [ ] **Model Selection Layer** (KeyboardModelSelector, fallback to FlaUI)
-  - Verifies focus before sending keys
-  - Retries on failure (keyboard nav, then FlaUI, then popup)
-  - Times out gracefully (doesn't hang forever)
-  - Logs which method succeeded (for debugging)
-
-- [ ] **UI Layer** (ModelPickDialog, tray icon)
-  - Popup shows recommendation clearly
-  - Auto-accept on high confidence (configurable)
-  - Timeout resets if user interacts (they control the flow)
-  - Dismiss doesn't break subsequent picks
-
-- [ ] **Persistence Layer** (FileLogger, Config)
-  - Logs to dated files with rotation
-  - Config hot-reloads on save
-  - No crashes on missing config (uses defaults)
-  - Prompts sanitized before logging
-
-### Dependency Injection & Testability
-
-- [ ] Services accept dependencies via constructor
-- [ ] No static dependencies (hard to mock/test)
-- [ ] Logging passed to services (not hardcoded Debug.WriteLine)
-- [ ] Tests can swap real services for mocks
-
-### Error Handling
-
-- [ ] Every async/hook operation has try-catch
-- [ ] Errors logged with context (what failed, why)
-- [ ] Graceful fallbacks (clipboard → FlaUI → popup)
-- [ ] User-facing errors are clear (not dev jargon)
-- [ ] No silent failures (at least Debug.WriteLine)
-
-### Performance & Threading
-
-- [ ] Keyboard hook doesn't block Claude Desktop
-- [ ] Input reading doesn't freeze UI (<100ms)
-- [ ] Analysis completes quickly (<500ms)
-- [ ] FileLogger is async or uses background thread
-- [ ] ConfigManager watch doesn't spam reloads
-
-### Configuration
-
-- [ ] config.json has all tuneable values
-- [ ] Defaults are sensible
-- [ ] Secrets (if any) NOT in config.json
-- [ ] Config keys match code (no typos)
-- [ ] Examples provided (config.json is self-documenting)
+### Test file patched to match the new constructor
+`Tests/PromptAnalyzerTests.cs` called `new PromptAnalyzer()` — broke the
+moment `PromptAnalyzer` started requiring a `ConfigManager`. Fixed to
+`new PromptAnalyzer(new ConfigManager())`.
 
 ---
 
-## Security Review (From SECURITY-AUDIT.md)
+## What is still NOT verified (the actual unknowns)
 
-### Critical (Fix before ship)
-- [ ] **Credential Leakage:** Prompts are sanitized (no API keys logged)
-  - Verify: `PromptAnalyzer.SanitizePrompt()` removes patterns
-  - Test: Log a prompt with "password=abc123", verify it's redacted
-  
-- [ ] **Focus Verification:** Keyboard navigation checks Claude is focused
-  - Verify: `KeyboardModelSelector.SelectModelViaKeyboard()` calls `VerifyFocus()`
-  - Test: Click email client, run selector, verify it doesn't type there
+Nothing above has run against a live Claude Desktop. Specifically unknown:
 
-### Important (Fix if time)
-- [ ] **Admin Privilege Warning:** App warns if running without admin
-  - Verify: Startup code checks `IsAdmin()` and shows MessageBox
-  - Test: Run as user, see warning; run as admin, proceed
-  
-- [ ] **Clipboard Restoration:** Logic is safe (doesn't corrupt)
-  - Verify: `ClipboardInputReader.ReadPromptViaClipboard()` handles exceptions
-  - Test: Have something in clipboard, call read, verify clipboard unchanged
+1. **Does the clipboard read even work?** Ctrl+A/Ctrl+C sent via
+   `SendKeys` assumes Claude Desktop's input field responds to those
+   shortcuts normally. Unverified.
+2. **Tab count to reach the model selector** — `config.json`'s
+   `modelSelection.methods.keyboard.tabCount: 5` is a guess from
+   `RESEARCH-InputMethods.md`, never confirmed against the real UI.
+3. **Dropdown order** — `KeyboardModelSelector` assumes Down = Sonnet,
+   Up = Haiku from whatever the current selection is. Also a guess.
+4. **Whether the global hook fires at all inside Claude Desktop**,
+   and whether `WarnIfNotAdmin`'s admin check is even the right
+   diagnosis if it doesn't.
+5. **Whether `SharpToken`'s `cl100k_base` encoding is a reasonable proxy
+   for Claude's actual tokenizer** — noted in the original README, still
+   unverified either way.
 
-- [ ] **Config Validation:** Invalid config doesn't crash app
-  - Verify: `ConfigManager.Load()` has ValidateConfig() with try-catch
-  - Test: Edit config.json with invalid JSON, run app
+## One loose end, not fixed (flagging, not deciding)
 
-### Nice to Have
-- [ ] **Dependency Audit:** NuGet packages are up-to-date and maintained
-  - Verify: Run `dotnet outdated` (or manual check) for vulnerabilities
-  - Note: `tiktoken-net` is third-party (estimate, not official)
-
----
-
-## Ship Decision
-
-### Ship if:
-- ✅ Builds without errors
-- ✅ Compiles to .exe (no runtime errors)
-- ✅ Keyboard hook fires and reads prompt (or gracefully falls back)
-- ✅ Model selection works (keyboard nav or FlaUI)
-- ✅ Security P1 mitigations in place (sanitized logs, focus check)
-- ✅ Tested on real Claude Desktop (not just compilation)
-- ✅ Error handling is robust (no crashes on edge cases)
-- ✅ Documentation is clear (user can install & run)
-
-### No-Ship / Needs Work if:
-- ❌ Hook never fires (keyboard input not intercepted)
-- ❌ Input reading fails consistently (clipboard + FlaUI both broken)
-- ❌ Credentials leaked in logs (sanitization missing or broken)
-- ❌ Crashes on unicode/long prompts (crashes, not fallback)
-- ❌ UI is confusing (user doesn't understand model pick)
-- ❌ No way to disable/uninstall cleanly
-- ❌ Admin requirement not documented
+`Models/ModelPickLog.cs` is now orphaned — nothing constructs it anymore.
+The original `ClaudeMonitorService` kept an in-memory `List<ModelPickLog>`
+for a future "usage dashboard" feature; that responsibility moved to
+`FileLogger`'s flat log files instead, and nothing reads them back into a
+structured list. Either delete `ModelPickLog.cs`, or if the usage
+dashboard is still wanted, build a reader over `FileLogger`'s log
+directory. Left as-is rather than guessing which Jason wants.
 
 ---
 
-## Final Checklist Before Shipping
+## Your job, Opus
 
-- [ ] All P1 security issues fixed
-- [ ] Build passes clean
-- [ ] Tested on real Claude Desktop
-- [ ] Logs created and sanitized
-- [ ] Config works and validates
-- [ ] Tests pass
-- [ ] Documentation complete
-- [ ] README updated with security notes
-- [ ] Version number bumped (e.g., 0.1.0)
-
+1. Confirm Jason's build report is clean (or work through whatever errors
+   come back — there may be more; this was fixed by reading, not
+   compiling).
+2. Once it builds: everything in "still NOT verified" above needs a real
+   Claude Desktop session to check. None of it can be confirmed from
+   source reading alone.
+3. Sign off or don't. Given point 3 above (nothing has run), "ship" here
+   should mean "ship for Jason to test," not "ship to end users."

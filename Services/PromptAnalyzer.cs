@@ -1,43 +1,83 @@
 using SharpToken;
 using ClaudeModelPicker.Models;
+using System;
+using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace ClaudeModelPicker.Services
 {
+    /// <summary>
+    /// Scores a prompt and recommends Haiku or Sonnet, based on token count
+    /// and keyword matches. All thresholds/keywords come from ConfigManager
+    /// (config.json) rather than being hardcoded, so tuning doesn't require
+    /// a rebuild.
+    /// </summary>
     public class PromptAnalyzer
     {
-        private static readonly string[] HaikuKeywords = { "summarize", "extract", "list", "fact", "code snippet", "quick", "simple" };
-        private static readonly string[] SonnetKeywords = { "analyze", "compare", "design", "debug", "complex", "explain", "reason", "architecture" };
+        private readonly ConfigManager _config;
+        private readonly GptEncoding _encoding;
+
+        // Cached: loading cl100k_base takes ~500ms on first use (see README
+        // "Known Limitations" / "High latency on Enter"). Loading it once in
+        // the constructor instead of per-call keeps the hook path fast after
+        // startup.
+        public PromptAnalyzer(ConfigManager config)
+        {
+            _config = config;
+            _encoding = GptEncoding.GetEncoding("cl100k_base");
+        }
+
+        // Credential-shaped patterns stripped before a prompt is ever logged
+        // or stored. Best-effort, not exhaustive — see SECURITY-AUDIT.md
+        // Finding #1. Applied here (at analysis time) so every caller gets a
+        // sanitized ModelPickLog for free, rather than relying on each log
+        // call site to remember to sanitize.
+        private static readonly (string Pattern, string Replacement)[] SanitizePatterns =
+        {
+            (@"sk-\w{20,}", "[REDACTED]"),           // OpenAI/Anthropic-style keys
+            (@"[A-Z0-9]{20,}", "[REDACTED]"),         // generic long uppercase tokens (AWS-style)
+            (@"password\s*[:=]\s*\S+", "password=[REDACTED]"),
+            (@"token\s*[:=]\s*\S+", "token=[REDACTED]"),
+            (@"secret\s*[:=]\s*\S+", "secret=[REDACTED]"),
+            (@"Bearer\s+[A-Za-z0-9\-_.]{10,}", "Bearer [REDACTED]"),
+        };
+
+        public static string SanitizePrompt(string prompt)
+        {
+            var sanitized = prompt;
+            foreach (var (pattern, replacement) in SanitizePatterns)
+                sanitized = Regex.Replace(sanitized, pattern, replacement, RegexOptions.IgnoreCase);
+            return sanitized;
+        }
 
         public ModelPick Analyze(string prompt)
         {
             try
             {
                 var tokenCount = CountTokens(prompt);
-                var hasSonnetKeywords = HasKeywords(prompt, SonnetKeywords);
-                var hasHaikuKeywords = HasKeywords(prompt, HaikuKeywords);
+                var haikuKeywords = _config.AnalysisHaikuKeywords;
+                var sonnetKeywords = _config.AnalysisSonnetKeywords;
 
-                // Scoring logic
+                var hasHaikuKeywords = HasKeywords(prompt, haikuKeywords);
+                var hasSonnetKeywords = HasKeywords(prompt, sonnetKeywords);
+
                 double sonnetScore = 0;
                 double haikuScore = 0;
 
-                // Token count scoring
-                if (tokenCount < 150)
-                    haikuScore += 0.4;
-                else if (tokenCount > 300)
-                    sonnetScore += 0.4;
+                if (tokenCount < _config.AnalysisHaikuMaxTokens)
+                    haikuScore += _config.AnalysisTokenCountWeight;
+                if (tokenCount > _config.AnalysisSonnetMinTokens)
+                    sonnetScore += _config.AnalysisTokenCountWeight;
 
-                // Keyword scoring
                 if (hasSonnetKeywords)
-                    sonnetScore += 0.5;
+                    sonnetScore += _config.AnalysisKeywordsWeight;
                 if (hasHaikuKeywords)
-                    haikuScore += 0.4;
+                    haikuScore += _config.AnalysisKeywordsWeight;
 
-                // Normalize
                 var total = sonnetScore + haikuScore;
                 if (total == 0)
                 {
-                    return new ModelPick { PickedModel = "Haiku", Confidence = 0.5 };
+                    return new ModelPick { PickedModel = "Haiku", Confidence = 0.5, TokenCount = tokenCount };
                 }
 
                 sonnetScore /= total;
@@ -54,9 +94,8 @@ namespace ClaudeModelPicker.Services
                     Reasoning = $"{picked} ({(int)(confidence * 100)}% confidence, {tokenCount} tokens)"
                 };
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                System.Diagnostics.Debug.WriteLine($"Analysis error: {ex.Message}");
                 return new ModelPick { PickedModel = "Haiku", Confidence = 0.5 };
             }
         }
@@ -65,22 +104,19 @@ namespace ClaudeModelPicker.Services
         {
             try
             {
-                // Use cl100k_base encoding for Claude
-                var encoding = GptEncoding.GetEncoding("cl100k_base");
-                var tokens = encoding.Encode(text);
-                return tokens.Count;
+                return _encoding.Encode(text).Count;
             }
             catch
             {
-                // Fallback: rough estimate (1 token ≈ 4 chars)
-                return text.Length / 4;
+                return text.Length / 4; // rough fallback: ~4 chars/token
             }
         }
 
-        private bool HasKeywords(string text, string[] keywords)
+        private static bool HasKeywords(string text, string[] keywords)
         {
-            var lower = text.ToLower();
-            return keywords.Any(kw => lower.Contains(kw, StringComparison.OrdinalIgnoreCase));
+            if (keywords.Length == 0) return false;
+            var lower = text.ToLowerInvariant();
+            return keywords.Any(kw => lower.Contains(kw.ToLowerInvariant()));
         }
     }
 }
