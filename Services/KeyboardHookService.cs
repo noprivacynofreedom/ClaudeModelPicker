@@ -89,7 +89,7 @@ namespace ClaudeModelPicker.Services
         /// </summary>
         private void OnKeyPressed(object? sender, KeyboardHookEventArgs e)
         {
-            if (e.Data.KeyCode != KeyCode.Return) return;
+            if (e.Data.KeyCode != KeyCode.VcEnter && e.Data.KeyCode != KeyCode.VcNumPadEnter) return;
 
             if (!TryPassThrottle())
             {

@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Xunit;
 using ClaudeModelPicker.Services;
 using ClaudeModelPicker.Models;
@@ -56,7 +57,9 @@ namespace ClaudeModelPicker.Tests
         public void CountTokens_LongPrompt_ReturnsHighCount()
         {
             // Arrange
-            string prompt = new string('a', 1000); // 1000 characters
+            // Repeated identical characters compress to very few BPE tokens.
+            // Use distinct words so the count reflects prompt length.
+            string prompt = string.Join(" ", Enumerable.Range(1, 300).Select(i => $"uniqueword{i}"));
 
             // Act
             var result = _analyzer.Analyze(prompt);
@@ -137,7 +140,7 @@ namespace ClaudeModelPicker.Tests
         {
             // Arrange
             string prompt = string.Join(" ",
-                Enumerable.Range(1, 100).Select(i => $"word{i}"));
+                Enumerable.Range(1, 400).Select(i => $"word{i}"));
 
             // Act
             var result = _analyzer.Analyze(prompt);

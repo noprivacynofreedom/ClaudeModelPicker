@@ -18,8 +18,8 @@ namespace ClaudeModelPicker
         {
             base.OnStartup(e);
 
-            MainWindow.Hide();
-            MainWindow.WindowState = WindowState.Minimized;
+            // No StartupUri and no main window: this is a tray-only app.
+            // ShutdownMode=OnExplicitShutdown keeps it alive until tray Exit.
 
             try
             {
@@ -46,6 +46,8 @@ namespace ClaudeModelPicker
             {
                 _fileLogger?.LogError("App.OnStartup", ex);
                 MessageBox.Show($"Failed to start hook service: {ex.Message}", "Error");
+                // No window and OnExplicitShutdown: without this the process would stay alive invisibly.
+                Shutdown();
             }
         }
 
