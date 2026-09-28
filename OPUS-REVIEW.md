@@ -1,8 +1,8 @@
 # OPUS REVIEW — ClaudeModelPicker
 
-Reviewed: 2026-09-28, branch `sonnet-build-fixes` at commit `07321a7`
+Reviewed: 2026-09-28, branch `sonnet-build-fixes` at commit `34165b9`
 Method: static read of every source file on that branch, plus Jason's local build result (`dotnet build` passes, 1 warning).
-Not reviewed: the 4 uncommitted local changes on Jason's PC (ModelPickDialog.xaml, FlaUIInputService.cs, KeyboardHookService.cs, PromptAnalyzerTests.cs). Commit and push them for a follow-up pass.
+The 4 local changes Jason had uncommitted match commit 34165b9, so they are covered.
 
 > v1 of this file reviewed `main` by mistake. Sonnet's work is on `sonnet-build-fixes`, not `main`. This version replaces it.
 
