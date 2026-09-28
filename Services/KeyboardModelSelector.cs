@@ -55,6 +55,15 @@ namespace ClaudeModelPicker.Services
                 SendKeys.SendWait("{ENTER}");
                 Thread.Sleep(300);
 
+                // Walk focus back to the prompt box so the caller's re-sent
+                // Enter sends the message. Mirrors the Tab walk above, so it is
+                // exactly as UNVERIFIED as tabCount.
+                for (int i = 0; i < _tabCount; i++)
+                {
+                    SendKeys.SendWait("+{TAB}");
+                    Thread.Sleep(100);
+                }
+
                 _logger?.LogEvent("KEYBOARD_SELECT", ("model", targetModel), ("result", "sent"));
                 // No UI-Automation feedback loop exists to confirm the click landed —
                 // this returns true optimistically. Tab count (_tabCount, from

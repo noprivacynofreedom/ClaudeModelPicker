@@ -4,6 +4,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using Forms = System.Windows.Forms;
 using ClaudeModelPicker.Models;
 
 namespace ClaudeModelPicker.Services
@@ -11,8 +12,10 @@ namespace ClaudeModelPicker.Services
     /// <summary>
     /// Installs a global low-level keyboard hook and reacts to Enter.
     ///
-    /// Only reacts when Claude Desktop (process "claude") is the foreground
-    /// app. Every other app's Enter passes straight through untouched.
+    /// Only reacts to a plain Enter when Claude Desktop (process "claude") is
+    /// the foreground app. Every other Enter passes straight through.
+    /// A handled Enter is suppressed, the prompt is read and analysed on an
+    /// STA thread, and then the Enter is re-sent so the message still goes.
     /// </summary>
     public class KeyboardHookService
     {
@@ -31,6 +34,11 @@ namespace ClaudeModelPicker.Services
         // (KeyboardModelSelector) arrives ~1 s after the real one, outside the
         // throttle window, so without this it re-triggers the hook (D4).
         private int _busy;
+
+        // 1 when a suppressed Enter could not be re-sent (Claude lost focus,
+        // e.g. to the popup). The user's next Enter in Claude then passes
+        // straight through instead of starting another read.
+        private int _passNextEnter;
 
         public KeyboardHookService(
             InputMethodManager inputManager,
@@ -95,9 +103,19 @@ namespace ClaudeModelPicker.Services
             // Keystrokes we sent ourselves never trigger another round.
             if (e.IsEventSimulated) return;
 
+            // Shift+Enter is a newline in Claude. Ctrl/Alt/Win+Enter are not ours either.
+            const ModifierMask anyModifier = ModifierMask.Shift | ModifierMask.Ctrl | ModifierMask.Alt | ModifierMask.Meta;
+            if ((e.RawEvent.Mask & anyModifier) != 0) return;
+
             // Safety gate (D2 + D5): nothing below may run unless Claude Desktop
             // is the foreground app, or Ctrl+A / Ctrl+C lands in whatever app is.
             if (!ForegroundCheck.IsClaudeForeground()) return;
+
+            if (Interlocked.Exchange(ref _passNextEnter, 0) == 1)
+            {
+                _logger?.LogEvent("HOOK_PASS_THROUGH");
+                return;
+            }
 
             if (Volatile.Read(ref _busy) == 1)
             {
@@ -117,12 +135,22 @@ namespace ClaudeModelPicker.Services
                 return;
             }
 
+            // D1: hold the Enter back so Claude does not send (and clear the
+            // box) before we read it. HandleEnter re-sends it when done.
+            // Suppression must be set here, synchronously, on the hook thread.
+            e.SuppressEvent = true;
             _logger?.LogHook(triggered: true);
-            Task.Run(() =>
+
+            // D3: WinForms Clipboard needs an STA thread. A thread-pool (MTA)
+            // thread makes Clipboard.GetText silently return "".
+            var worker = new Thread(() =>
             {
-                try { HandleEnterAsync(); }
+                try { HandleEnter(); }
                 finally { Volatile.Write(ref _busy, 0); }
             });
+            worker.SetApartmentState(ApartmentState.STA);
+            worker.IsBackground = true;
+            worker.Start();
         }
 
         private bool TryPassThrottle()
@@ -139,7 +167,24 @@ namespace ClaudeModelPicker.Services
             }
         }
 
-        private void HandleEnterAsync()
+        /// <summary>
+        /// Runs on a dedicated STA thread with the user's Enter suppressed.
+        /// Always ends by re-sending that Enter, so a failed read or a crash
+        /// never swallows the user's message.
+        /// </summary>
+        private void HandleEnter()
+        {
+            try
+            {
+                HandlePrompt();
+            }
+            finally
+            {
+                ResendEnter();
+            }
+        }
+
+        private void HandlePrompt()
         {
             try
             {
@@ -166,7 +211,36 @@ namespace ClaudeModelPicker.Services
             }
             catch (Exception ex)
             {
-                _logger?.LogError("KeyboardHookService.HandleEnterAsync", ex);
+                _logger?.LogError("KeyboardHookService.HandlePrompt", ex);
+            }
+        }
+
+        /// <summary>
+        /// Sends the held-back Enter to Claude. {RIGHT} first collapses the
+        /// Ctrl+A selection so the Enter cannot replace the prompt text.
+        /// If Claude is no longer foreground, sends nothing (fail closed) and
+        /// lets the user's next Enter pass through untouched.
+        /// </summary>
+        private void ResendEnter()
+        {
+            try
+            {
+                if (!ForegroundCheck.IsClaudeForeground())
+                {
+                    Volatile.Write(ref _passNextEnter, 1);
+                    _logger?.LogEvent("ENTER_NOT_RESENT", ("reason", "claude_not_foreground"));
+                    return;
+                }
+
+                Forms.SendKeys.SendWait("{RIGHT}");
+                Thread.Sleep(30);
+                Forms.SendKeys.SendWait("{ENTER}");
+                _logger?.LogEvent("ENTER_RESENT");
+            }
+            catch (Exception ex)
+            {
+                Volatile.Write(ref _passNextEnter, 1);
+                _logger?.LogError("KeyboardHookService.ResendEnter", ex);
             }
         }
 
