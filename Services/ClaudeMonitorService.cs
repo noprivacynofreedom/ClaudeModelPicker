@@ -1,6 +1,10 @@
 using FlaUI.Core;
+using FlaUI.Core.AutomationElements;
+using FlaUI.Core.Definitions;
 using FlaUI.UIA3;
 using System;
+using System.Linq;
+using System.Threading;
 
 namespace ClaudeModelPicker.Services
 {
@@ -21,6 +25,15 @@ namespace ClaudeModelPicker.Services
         private readonly UIA3Automation _automation;
         private readonly FileLogger? _logger;
 
+        // Same API calls as FlaUIInputService on sonnet-build-fixes (34165b9),
+        // which compiled against FlaUI 4.0.0 on Jason's PC.
+        private AutomationElement? FindClaudeWindow()
+        {
+            return _automation.GetDesktop()
+                .FindAllChildren(cf => cf.ByControlType(ControlType.Window))
+                .FirstOrDefault(w => w.Name == "Claude");
+        }
+
         public ClaudeMonitorService(FileLogger? logger = null)
         {
             _automation = new UIA3Automation();
@@ -36,20 +49,19 @@ namespace ClaudeModelPicker.Services
         {
             try
             {
-                var claudeWindow = _automation.GetDesktop()
-                    .FindFirstByNameAndControlType("Claude", FlaUI.Core.Definitions.ControlType.Window);
+                var claudeWindow = FindClaudeWindow();
 
                 if (claudeWindow == null)
                     return string.Empty;
 
-                var inputFields = claudeWindow.FindAllByControlType(FlaUI.Core.Definitions.ControlType.Edit);
+                var inputFields = claudeWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.Edit));
                 if (inputFields.Length == 0)
-                    inputFields = claudeWindow.FindAllByControlType(FlaUI.Core.Definitions.ControlType.Text);
+                    inputFields = claudeWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.Text));
 
                 if (inputFields.Length == 0)
                     return string.Empty;
 
-                var lastField = inputFields[^1];
+                var lastField = inputFields.Last();
                 return lastField.AsTextBox()?.Text ?? string.Empty;
             }
             catch (Exception ex)
@@ -68,14 +80,13 @@ namespace ClaudeModelPicker.Services
         {
             try
             {
-                var claudeWindow = _automation.GetDesktop()
-                    .FindFirstByNameAndControlType("Claude", FlaUI.Core.Definitions.ControlType.Window);
+                var claudeWindow = FindClaudeWindow();
 
                 if (claudeWindow == null)
                     return false;
 
-                var buttons = claudeWindow.FindAllByControlType(FlaUI.Core.Definitions.ControlType.Button);
-                var modelButton = Array.Find(buttons, b =>
+                var buttons = claudeWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.Button));
+                var modelButton = buttons.FirstOrDefault(b =>
                     b.Name?.Contains("Haiku", StringComparison.OrdinalIgnoreCase) == true ||
                     b.Name?.Contains("Sonnet", StringComparison.OrdinalIgnoreCase) == true ||
                     b.Name?.Contains("Model", StringComparison.OrdinalIgnoreCase) == true);
@@ -84,10 +95,10 @@ namespace ClaudeModelPicker.Services
                     return false;
 
                 modelButton.Click();
-                System.Threading.Thread.Sleep(300);
+                Thread.Sleep(300);
 
-                var dropdownItems = claudeWindow.FindAllByControlType(FlaUI.Core.Definitions.ControlType.MenuItem);
-                var targetItem = Array.Find(dropdownItems, item =>
+                var dropdownItems = claudeWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.MenuItem));
+                var targetItem = dropdownItems.FirstOrDefault(item =>
                     item.Name?.Contains(model, StringComparison.OrdinalIgnoreCase) == true);
 
                 if (targetItem == null)
