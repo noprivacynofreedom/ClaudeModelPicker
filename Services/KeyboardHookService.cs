@@ -42,6 +42,9 @@ namespace ClaudeModelPicker.Services
 
         private const int FocusSettleMs = 250;
 
+        // Last model the user accepted, picked or skipped. Only touched on the worker thread.
+        private string? _lastModel;
+
         public KeyboardHookService(
             InputMethodManager inputManager,
             PromptAnalyzer analyzer,
@@ -200,16 +203,30 @@ namespace ClaudeModelPicker.Services
                 var pick = _analyzer.Analyze(prompt);
                 _logger?.LogAnalysis(PromptAnalyzer.SanitizePrompt(prompt), pick.PickedModel, pick.Confidence, pick.TokenCount);
 
+                // Only ask when the recommendation changes. Same model as last
+                // time = no popup, the message just sends.
+                if (string.Equals(pick.PickedModel, _lastModel, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger?.LogEvent("POPUP_SKIPPED", ("reason", "same_model"), ("model", pick.PickedModel));
+                    return;
+                }
+
                 var autoAcceptThreshold = _config.PopupAutoAcceptConfidence;
-                if (pick.Confidence > autoAcceptThreshold)
+                if (pick.Confidence > autoAcceptThreshold && _inputManager.SelectModel(pick.PickedModel))
                 {
-                    if (!_inputManager.SelectModel(pick.PickedModel))
-                        ShowPopupOnUiThread(pick);
+                    _lastModel = pick.PickedModel;
+                    return;
                 }
-                else
+
+                var chosen = ShowPopupOnUiThread(pick);
+                if (chosen != null)
                 {
-                    ShowPopupOnUiThread(pick);
+                    _inputManager.SelectModel(chosen);
+                    _logger?.LogEvent("MODEL_CHOSEN", ("model", chosen));
                 }
+
+                // Skip counts as "fine, stop asking" for this recommendation.
+                _lastModel = chosen ?? pick.PickedModel;
             }
             catch (Exception ex)
             {
@@ -267,14 +284,17 @@ namespace ClaudeModelPicker.Services
         /// ModelPickDialog is a WPF Window — it must be shown on the UI
         /// thread, not the background Task this method is called from.
         /// </summary>
-        private void ShowPopupOnUiThread(ModelPick pick)
+        /// <returns>"Haiku" or "Sonnet" if a button was clicked, null for Skip or close.</returns>
+        private string? ShowPopupOnUiThread(ModelPick pick)
         {
+            string? chosen = null;
             try
             {
                 Application.Current?.Dispatcher.Invoke(() =>
                 {
                     var dialog = new ModelPickDialog(pick);
                     dialog.ShowDialog();
+                    chosen = dialog.GetSelectedModel();
                 });
 
                 WaitForClaudeFocusAfterPopup();
@@ -283,6 +303,7 @@ namespace ClaudeModelPicker.Services
             {
                 _logger?.LogError("KeyboardHookService.ShowPopupOnUiThread", ex);
             }
+            return chosen;
         }
     }
 }
