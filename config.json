@@ -51,7 +51,7 @@
         "restoreClipboard": true
       },
       "keyboard": {
-        "enabled": true,
+        "enabled": false,
         "tabCount": 5,
         "timeoutMs": 2000
       },

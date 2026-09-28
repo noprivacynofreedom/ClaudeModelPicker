@@ -1,4 +1,6 @@
 using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -13,6 +15,7 @@ namespace ClaudeModelPicker.Services
     /// </summary>
     public class ClipboardInputReader
     {
+        private const int CopyTimeoutMs = 500;
         private readonly FileLogger? _logger;
 
         public ClipboardInputReader(FileLogger? logger = null)
@@ -36,11 +39,33 @@ namespace ClaudeModelPicker.Services
 
                 SendKeys.SendWait("^a");
                 Thread.Sleep(50);
-                SendKeys.SendWait("^c");
-                Thread.Sleep(100); // clipboard write is async in Electron/Chromium — give it time
 
-                var prompt = SafeGetText() ?? string.Empty;
-                _logger?.LogEvent("CLIPBOARD_READ", ("length", prompt.Length.ToString()));
+                var seqBefore = GetClipboardSequenceNumber();
+                SendKeys.SendWait("^c");
+
+                // Chromium writes the clipboard async. Poll for the sequence
+                // number to change instead of a fixed 100 ms sleep.
+                var timer = Stopwatch.StartNew();
+                var changed = false;
+                while (timer.ElapsedMilliseconds < CopyTimeoutMs)
+                {
+                    if (GetClipboardSequenceNumber() != seqBefore)
+                    {
+                        changed = true;
+                        Thread.Sleep(20); // let the writer finish all formats
+                        break;
+                    }
+                    Thread.Sleep(15);
+                }
+
+                // No change means Ctrl+C copied nothing. Do not read: the
+                // clipboard still holds the user's old text, not the prompt.
+                var prompt = changed ? (SafeGetText() ?? string.Empty) : string.Empty;
+                _logger?.LogEvent("CLIPBOARD_READ",
+                    ("length", prompt.Length.ToString()),
+                    ("seq_changed", changed.ToString()),
+                    ("wait_ms", timer.ElapsedMilliseconds.ToString()),
+                    ("had_old_text", (savedClipboard != null).ToString()));
                 return prompt;
             }
             catch (Exception ex)
@@ -84,5 +109,8 @@ namespace ClaudeModelPicker.Services
         {
             try { Clipboard.Clear(); } catch { /* best effort */ }
         }
+
+        [DllImport("user32.dll")]
+        private static extern uint GetClipboardSequenceNumber();
     }
 }
