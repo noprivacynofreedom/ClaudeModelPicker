@@ -11,12 +11,8 @@ namespace ClaudeModelPicker.Services
     /// <summary>
     /// Installs a global low-level keyboard hook and reacts to Enter.
     ///
-    /// Requires the hooking process to run at the same or higher integrity
-    /// level as Claude Desktop to intercept its keystrokes (see
-    /// SECURITY-AUDIT.md "Admin privilege requirements"). This does not
-    /// filter by foreground window on its own — that check lives in
-    /// KeyboardModelSelector.VerifyClaudeIsForeground(), called before any
-    /// synthetic keystrokes are sent.
+    /// Only reacts when Claude Desktop (process "claude") is the foreground
+    /// app. Every other app's Enter passes straight through untouched.
     /// </summary>
     public class KeyboardHookService
     {
@@ -30,6 +26,11 @@ namespace ClaudeModelPicker.Services
 
         private DateTime _lastTrigger = DateTime.MinValue;
         private readonly object _throttleLock = new();
+
+        // 1 while a read/select is in progress. Our own simulated {ENTER}
+        // (KeyboardModelSelector) arrives ~1 s after the real one, outside the
+        // throttle window, so without this it re-triggers the hook (D4).
+        private int _busy;
 
         public KeyboardHookService(
             InputMethodManager inputManager,
@@ -91,14 +92,37 @@ namespace ClaudeModelPicker.Services
         {
             if (e.Data.KeyCode != KeyCode.VcEnter && e.Data.KeyCode != KeyCode.VcNumPadEnter) return;
 
+            // Keystrokes we sent ourselves never trigger another round.
+            if (e.IsEventSimulated) return;
+
+            // Safety gate (D2 + D5): nothing below may run unless Claude Desktop
+            // is the foreground app, or Ctrl+A / Ctrl+C lands in whatever app is.
+            if (!ForegroundCheck.IsClaudeForeground()) return;
+
+            if (Volatile.Read(ref _busy) == 1)
+            {
+                _logger?.LogEvent("HOOK_BUSY");
+                return;
+            }
+
             if (!TryPassThrottle())
             {
                 _logger?.LogEvent("HOOK_THROTTLED");
                 return;
             }
 
+            if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0)
+            {
+                _logger?.LogEvent("HOOK_BUSY");
+                return;
+            }
+
             _logger?.LogHook(triggered: true);
-            Task.Run(() => HandleEnterAsync());
+            Task.Run(() =>
+            {
+                try { HandleEnterAsync(); }
+                finally { Volatile.Write(ref _busy, 0); }
+            });
         }
 
         private bool TryPassThrottle()

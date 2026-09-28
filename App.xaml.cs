@@ -1,5 +1,4 @@
 using System;
-using System.Security.Principal;
 using System.Windows;
 using ClaudeModelPicker.Services;
 using Forms = System.Windows.Forms;
@@ -28,8 +27,6 @@ namespace ClaudeModelPicker
 
                 _fileLogger.CleanupOldLogs(_configManager.AppLogsToKeepDays);
 
-                WarnIfNotAdmin();
-
                 _flaUiFallback = new ClaudeMonitorService(_fileLogger);
                 var inputManager = new InputMethodManager(_flaUiFallback, _configManager, _fileLogger);
                 var analyzer = new PromptAnalyzer(_configManager);
@@ -48,42 +45,6 @@ namespace ClaudeModelPicker
                 MessageBox.Show($"Failed to start hook service: {ex.Message}", "Error");
                 // No window and OnExplicitShutdown: without this the process would stay alive invisibly.
                 Shutdown();
-            }
-        }
-
-        /// <summary>
-        /// Global keyboard hooks intercept the calling process's window at
-        /// the same or higher integrity level. If Claude Desktop or Windows
-        /// is elevated and this app isn't, the hook installs without error
-        /// but silently never fires for that window. Warn once at startup
-        /// rather than leave the user wondering why nothing happens — see
-        /// SECURITY-AUDIT.md "Admin privilege requirements", flagged as
-        /// "needs documenting, not fixing."
-        /// </summary>
-        private void WarnIfNotAdmin()
-        {
-            try
-            {
-                using var identity = WindowsIdentity.GetCurrent();
-                var principal = new WindowsPrincipal(identity);
-                var isAdmin = principal.IsInRole(WindowsBuiltInRole.Administrator);
-
-                if (!isAdmin)
-                {
-                    _fileLogger?.LogEvent("STARTUP_WARNING", ("reason", "not_running_as_admin"));
-                    MessageBox.Show(
-                        "Claude Model Picker is not running as Administrator.\n\n" +
-                        "If Claude Desktop is running elevated, this app's keyboard hook " +
-                        "will not be able to intercept its keystrokes. If Enter presses in " +
-                        "Claude Desktop don't trigger a popup, try restarting this app as Administrator.",
-                        "Claude Model Picker — Admin Notice",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Information);
-                }
-            }
-            catch (Exception ex)
-            {
-                _fileLogger?.LogError("App.WarnIfNotAdmin", ex);
             }
         }
 
