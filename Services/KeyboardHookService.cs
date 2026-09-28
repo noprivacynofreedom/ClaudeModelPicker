@@ -40,6 +40,8 @@ namespace ClaudeModelPicker.Services
         // straight through instead of starting another read.
         private int _passNextEnter;
 
+        private const int FocusSettleMs = 250;
+
         public KeyboardHookService(
             InputMethodManager inputManager,
             PromptAnalyzer analyzer,
@@ -245,6 +247,23 @@ namespace ClaudeModelPicker.Services
         }
 
         /// <summary>
+        /// After the popup closes, Windows hands the foreground back to
+        /// Claude, but Chromium restores focus to the text box a moment
+        /// later. An Enter sent in that gap is lost (seen on the real test:
+        /// ENTER_RESENT logged, message not sent). Wait for Claude to be
+        /// foreground, then give the text box time to take focus.
+        /// </summary>
+        private void WaitForClaudeFocusAfterPopup()
+        {
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            while (timer.ElapsedMilliseconds < 1000 && !ForegroundCheck.IsClaudeForeground())
+                Thread.Sleep(20);
+
+            Thread.Sleep(FocusSettleMs);
+            _logger?.LogEvent("POPUP_FOCUS_WAIT", ("ms", timer.ElapsedMilliseconds.ToString()));
+        }
+
+        /// <summary>
         /// ModelPickDialog is a WPF Window — it must be shown on the UI
         /// thread, not the background Task this method is called from.
         /// </summary>
@@ -257,6 +276,8 @@ namespace ClaudeModelPicker.Services
                     var dialog = new ModelPickDialog(pick);
                     dialog.ShowDialog();
                 });
+
+                WaitForClaudeFocusAfterPopup();
             }
             catch (Exception ex)
             {
