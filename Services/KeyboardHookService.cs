@@ -42,6 +42,12 @@ namespace ClaudeModelPicker.Services
 
         private const int FocusSettleMs = 250;
 
+        /// <summary>
+        /// Raised (on the hook thread) each time a real Enter in Claude Desktop
+        /// is accepted for handling. App uses it to reset the idle shutdown timer.
+        /// </summary>
+        public event Action? PromptActivity;
+
         // Last model the user accepted, picked or skipped. Only touched on the worker thread.
         private string? _lastModel;
 
@@ -115,6 +121,9 @@ namespace ClaudeModelPicker.Services
             // Safety gate (D2 + D5): nothing below may run unless Claude Desktop
             // is the foreground app, or Ctrl+A / Ctrl+C lands in whatever app is.
             if (!ForegroundCheck.IsClaudeForeground()) return;
+
+            // Idle-shutdown clock: any real Enter in Claude counts as activity.
+            PromptActivity?.Invoke();
 
             if (Interlocked.Exchange(ref _passNextEnter, 0) == 1)
             {

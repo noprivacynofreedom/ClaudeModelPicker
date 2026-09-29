@@ -1,5 +1,8 @@
 using System;
+using System.Linq;
+using System.Threading;
 using System.Windows;
+using System.Windows.Threading;
 using ClaudeModelPicker.Services;
 using Forms = System.Windows.Forms;
 
@@ -13,9 +16,33 @@ namespace ClaudeModelPicker
         private KeyboardHookService? _hookService;
         private Forms.NotifyIcon? _trayIcon;
 
+        // One copy only: "cmp online" run twice must not start two hooks.
+        private Mutex? _singleInstance;
+
+        // Idle shutdown: last real Enter in Claude (UTC ticks). Checked every 30 s.
+        private long _lastActivityTicks;
+        private DispatcherTimer? _idleTimer;
+
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
+
+            // Diagnostic mode: "ClaudeModelPicker.exe --uia-dump" writes Claude's UI
+            // element names to a file, then exits. No hook, no tray, no mutex.
+            if (e.Args.Contains("--uia-dump"))
+            {
+                var dumpPath = UiaDiagnostic.Run();
+                MessageBox.Show("UIA dump written to:\n" + dumpPath, "ClaudeModelPicker");
+                Shutdown();
+                return;
+            }
+
+            _singleInstance = new Mutex(true, "ClaudeModelPicker.SingleInstance", out var isFirstInstance);
+            if (!isFirstInstance)
+            {
+                Shutdown();
+                return;
+            }
 
             // No StartupUri and no main window: this is a tray-only app.
             // ShutdownMode=OnExplicitShutdown keeps it alive until tray Exit.
@@ -33,6 +60,14 @@ namespace ClaudeModelPicker
 
                 _hookService = new KeyboardHookService(inputManager, analyzer, _flaUiFallback, _configManager, _fileLogger);
                 _hookService.Start();
+
+                _lastActivityTicks = DateTime.UtcNow.Ticks;
+                _hookService.PromptActivity += () =>
+                    Interlocked.Exchange(ref _lastActivityTicks, DateTime.UtcNow.Ticks);
+
+                _idleTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+                _idleTimer.Tick += (_, _) => CheckIdle();
+                _idleTimer.Start();
 
                 if (_configManager.AppMinimizeToTray)
                     SetupTrayIcon();
@@ -77,8 +112,20 @@ namespace ClaudeModelPicker
             }
         }
 
+        private void CheckIdle()
+        {
+            var limitMinutes = _configManager?.AppIdleShutdownMinutes ?? 10;
+            var last = new DateTime(Interlocked.Read(ref _lastActivityTicks), DateTimeKind.Utc);
+            var idle = DateTime.UtcNow - last;
+            if (idle.TotalMinutes < limitMinutes) return;
+
+            _fileLogger?.LogEvent("IDLE_SHUTDOWN", ("idle_minutes", ((int)idle.TotalMinutes).ToString()));
+            Shutdown();
+        }
+
         protected override void OnExit(ExitEventArgs e)
         {
+            _idleTimer?.Stop();
             _fileLogger?.LogEvent("APP_EXITING");
             _hookService?.Stop();
             _flaUiFallback?.Dispose();
