@@ -54,8 +54,8 @@ namespace ClaudeModelPicker.Services
                 {
                     modelButton = w.FindAllDescendants()
                         .Where(e => e.Properties.ControlType.ValueOrDefault == ControlType.Button)
-                        .FirstOrDefault(e => ModelWords.Any(m =>
-                            (e.Properties.Name.ValueOrDefault ?? "").Contains(m, StringComparison.OrdinalIgnoreCase)));
+                        .FirstOrDefault(e => (e.Properties.Name.ValueOrDefault ?? "")
+                            .StartsWith("Model:", StringComparison.OrdinalIgnoreCase));
                     if (modelButton != null) break;
                 }
 

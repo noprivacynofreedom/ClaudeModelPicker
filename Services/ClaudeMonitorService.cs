@@ -85,29 +85,53 @@ namespace ClaudeModelPicker.Services
                 if (claudeWindow == null)
                     return false;
 
-                var buttons = claudeWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.Button));
-                var modelButton = buttons.FirstOrDefault(b =>
-                    b.Name?.Contains("Haiku", StringComparison.OrdinalIgnoreCase) == true ||
-                    b.Name?.Contains("Sonnet", StringComparison.OrdinalIgnoreCase) == true ||
-                    b.Name?.Contains("Model", StringComparison.OrdinalIgnoreCase) == true);
+                // Names below come from the real UIA dump (uia-dump.txt):
+                //   Button  "Model: Sonnet 5.5 Medium"  [ExpandCollapse]
+                //   RadioButton "Opus 5.5 For complex work..." [Invoke,SelectionItem]
+                // Only UIA patterns are used. No mouse, no Tab, no arrow keys.
+                var modelButton = claudeWindow
+                    .FindAllDescendants(cf => cf.ByControlType(ControlType.Button))
+                    .FirstOrDefault(b => b.Name?.StartsWith("Model:", StringComparison.OrdinalIgnoreCase) == true);
 
                 if (modelButton == null)
                     return false;
 
-                modelButton.Click();
-                Thread.Sleep(300);
+                // Already on the wanted model: nothing to do.
+                if (modelButton.Name!.Contains(model, StringComparison.OrdinalIgnoreCase))
+                    return true;
 
-                var dropdownItems = claudeWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.MenuItem));
-                var targetItem = dropdownItems.FirstOrDefault(item =>
-                    item.Name?.Contains(model, StringComparison.OrdinalIgnoreCase) == true);
+                var expand = modelButton.Patterns.ExpandCollapse.PatternOrDefault;
+                if (expand == null)
+                    return false;
 
-                if (targetItem == null)
+                expand.Expand();
+
+                AutomationElement? target = null;
+                for (var i = 0; i < 10 && target == null; i++)
                 {
-                    modelButton.Click(); // best-effort: close the dropdown we opened
+                    Thread.Sleep(150);
+                    target = claudeWindow
+                        .FindAllDescendants(cf => cf.ByControlType(ControlType.RadioButton))
+                        .FirstOrDefault(r => r.Name?.StartsWith(model, StringComparison.OrdinalIgnoreCase) == true);
+                }
+
+                if (target == null)
+                {
+                    expand.Collapse(); // close the menu we opened
                     return false;
                 }
 
-                targetItem.Click();
+                var select = target.Patterns.SelectionItem.PatternOrDefault;
+                var invoke = target.Patterns.Invoke.PatternOrDefault;
+                if (invoke != null) invoke.Invoke();
+                else select?.Select();
+
+                Thread.Sleep(200);
+                try { if (expand.ExpandCollapseState.Value == FlaUI.Core.Definitions.ExpandCollapseState.Expanded) expand.Collapse(); }
+                catch { /* menu already closed */ }
+
+                // Put the caret back in the prompt box so Enter still sends the message.
+                claudeWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.Edit)).LastOrDefault()?.Focus();
                 return true;
             }
             catch (Exception ex)
