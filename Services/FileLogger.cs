@@ -14,8 +14,6 @@ namespace ClaudeModelPicker.Services
     {
         private readonly string _logDirectory;
         private readonly object _lockObj = new();
-        private StreamWriter? _currentWriter;
-        private string? _currentLogFile;
 
         public FileLogger()
         {
@@ -40,8 +38,6 @@ namespace ClaudeModelPicker.Services
             {
                 try
                 {
-                    EnsureLogFile();
-
                     var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
                     var detailsStr = details.Length > 0
                         ? " | " + string.Join(", ", details.Select(d => $"{d.key}={d.value}"))
@@ -49,8 +45,7 @@ namespace ClaudeModelPicker.Services
 
                     var line = $"[{timestamp}] {action}{detailsStr}";
 
-                    _currentWriter?.WriteLine(line);
-                    _currentWriter?.Flush();
+                    AppendLine(line);
                 }
                 catch (Exception ex)
                 {
@@ -191,19 +186,27 @@ namespace ClaudeModelPicker.Services
 
         // Private helpers
 
-        private void EnsureLogFile()
+        /// <summary>
+        /// Opens, appends, closes. A writer held open for the whole run would
+        /// block (or overwrite) lines from a second process: "--select" runs as
+        /// its own process while the tray app is logging to the same file.
+        /// </summary>
+        private void AppendLine(string line)
         {
-            var logFile = GetLogFilePath(DateTime.Now);
-
-            // If date changed, close old writer and open new file
-            if (_currentLogFile != logFile)
+            var bytes = Encoding.UTF8.GetBytes(line + Environment.NewLine);
+            for (var attempt = 0; ; attempt++)
             {
-                _currentWriter?.Dispose();
-                _currentLogFile = logFile;
-                _currentWriter = new StreamWriter(logFile, true, Encoding.UTF8)
+                try
                 {
-                    AutoFlush = true
-                };
+                    using var stream = new FileStream(GetLogFilePath(DateTime.Now), FileMode.Append,
+                        FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+                    stream.Write(bytes, 0, bytes.Length);
+                    return;
+                }
+                catch (IOException) when (attempt < 3)
+                {
+                    System.Threading.Thread.Sleep(15);
+                }
             }
         }
 
@@ -215,10 +218,7 @@ namespace ClaudeModelPicker.Services
 
         public void Dispose()
         {
-            lock (_lockObj)
-            {
-                _currentWriter?.Dispose();
-            }
+            // Nothing held open: see AppendLine.
         }
     }
 }

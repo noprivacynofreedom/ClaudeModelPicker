@@ -25,13 +25,14 @@ namespace ClaudeModelPicker.Services
         private readonly ClaudeMonitorService _flaUiFallback;
         private readonly FileLogger? _logger;
         private readonly ConfigManager _config;
+        private readonly ModeStore? _modes;
         private bool _isRunning;
 
         private DateTime _lastTrigger = DateTime.MinValue;
         private readonly object _throttleLock = new();
 
         // 1 while a read/select is in progress. Our own simulated {ENTER}
-        // (KeyboardModelSelector) arrives ~1 s after the real one, outside the
+        // arrives ~1 s after the real one, outside the
         // throttle window, so without this it re-triggers the hook (D4).
         private int _busy;
 
@@ -56,13 +57,15 @@ namespace ClaudeModelPicker.Services
             PromptAnalyzer analyzer,
             ClaudeMonitorService flaUiFallback,
             ConfigManager config,
-            FileLogger? logger = null)
+            FileLogger? logger = null,
+            ModeStore? modes = null)
         {
             _inputManager = inputManager;
             _analyzer = analyzer;
             _flaUiFallback = flaUiFallback;
             _config = config;
             _logger = logger;
+            _modes = modes;
             _hook = new SimpleGlobalHook();
             _hook.KeyPressed += OnKeyPressed;
         }
@@ -101,7 +104,7 @@ namespace ClaudeModelPicker.Services
         /// <summary>
         /// Fires on the global hook's own thread. Does the minimum possible
         /// work here (key filter + throttle check) and offloads everything
-        /// else — clipboard/keyboard-nav I/O, analysis, popup — to a
+        /// else — clipboard I/O, analysis, popup — to a
         /// background task, so a slow prompt read or a stuck dialog never
         /// blocks keystrokes system-wide. This was flagged as a P1 item in
         /// HANDOFF-SONNET.md ("Hook fires synchronously ... can freeze
@@ -124,6 +127,9 @@ namespace ClaudeModelPicker.Services
 
             // Idle-shutdown clock: any real Enter in Claude counts as activity.
             PromptActivity?.Invoke();
+
+            // Passive mode: leave the Enter alone, Claude sends as normal.
+            if (_modes?.Mode == PickerMode.Passive) return;
 
             if (Interlocked.Exchange(ref _passNextEnter, 0) == 1)
             {

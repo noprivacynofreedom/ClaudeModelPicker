@@ -64,6 +64,12 @@ When you press **Enter** in Claude Desktop:
 - Keywords match whole words only ("refactor" no longer hits "fact"). Ties go to the cheaper model.
 - **Uncertain** (50-80%): shows popup for manual choice
 
+### Modes
+- **Active**: Enter is held, the prompt is read, a model is recommended and switched, then the message sends.
+- **Passive**: Enter goes straight to Claude. No read, no popup, no switch.
+- Set from the tray menu or from ClaudeUsageMonitor (card 04). Stored in `%AppData%\ClaudeModelPicker\mode.txt`.
+- `ClaudeModelPicker.exe --select Opus` switches Claude Desktop once and exits (0 ok, 1 failed, 2 bad name).
+
 ### Fallback Behavior
 - **Auto-click fails** → popup dialog
 - **Both fail** → do nothing (let you choose manually)
@@ -169,7 +175,7 @@ Proprietary. Built for Jason's Claude workflow.
 ---
 
 **Status:** v0.2 (pre-alpha). Build blockers fixed and the architecture is
-wired together (clipboard read, keyboard-nav select, config-driven
+wired together (clipboard read, UIA model select, config-driven
 analysis, file logging, throttled async hook, tray icon). None of it has
 been run against a real Claude Desktop — see HANDOFF-OPUS.md for exactly
 what's verified vs. still a guess.

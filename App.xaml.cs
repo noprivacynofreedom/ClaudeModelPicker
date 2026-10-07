@@ -10,11 +10,19 @@ namespace ClaudeModelPicker
 {
     public partial class App : Application
     {
+        // Exit codes for "--select <model>" (read by ClaudeUsageMonitor).
+        public const int SelectOk = 0;
+        public const int SelectFailed = 1;
+        public const int SelectBadArgs = 2;
+
         private ConfigManager? _configManager;
         private FileLogger? _fileLogger;
         private ClaudeMonitorService? _flaUiFallback;
         private KeyboardHookService? _hookService;
+        private ModeStore? _modes;
         private Forms.NotifyIcon? _trayIcon;
+        private Forms.ToolStripMenuItem? _activeItem;
+        private Forms.ToolStripMenuItem? _passiveItem;
 
         // One copy only: "cmp online" run twice must not start two hooks.
         private Mutex? _singleInstance;
@@ -37,6 +45,16 @@ namespace ClaudeModelPicker
                 return;
             }
 
+            // One-shot switch: "ClaudeModelPicker.exe --select Opus" switches Claude
+            // Desktop's model and exits with SelectOk / SelectFailed / SelectBadArgs.
+            // ClaudeUsageMonitor's model drop-down runs this. No hook, no tray, no mutex.
+            var selectAt = Array.IndexOf(e.Args, "--select");
+            if (selectAt >= 0)
+            {
+                Shutdown(RunSelect(e.Args.Skip(selectAt + 1).FirstOrDefault()));
+                return;
+            }
+
             _singleInstance = new Mutex(true, "ClaudeModelPicker.SingleInstance", out var isFirstInstance);
             if (!isFirstInstance)
             {
@@ -51,6 +69,7 @@ namespace ClaudeModelPicker
             {
                 _fileLogger = new FileLogger();
                 _configManager = new ConfigManager();
+                _modes = new ModeStore();
 
                 _fileLogger.CleanupOldLogs(_configManager.AppLogsToKeepDays);
 
@@ -58,7 +77,7 @@ namespace ClaudeModelPicker
                 var inputManager = new InputMethodManager(_flaUiFallback, _configManager, _fileLogger);
                 var analyzer = new PromptAnalyzer(_configManager);
 
-                _hookService = new KeyboardHookService(inputManager, analyzer, _flaUiFallback, _configManager, _fileLogger);
+                _hookService = new KeyboardHookService(inputManager, analyzer, _flaUiFallback, _configManager, _fileLogger, _modes);
                 _hookService.Start();
 
                 _lastActivityTicks = DateTime.UtcNow.Ticks;
@@ -72,7 +91,13 @@ namespace ClaudeModelPicker
                 if (_configManager.AppMinimizeToTray)
                     SetupTrayIcon();
 
-                _fileLogger.LogEvent("APP_STARTED");
+                _modes.Changed += mode =>
+                {
+                    _fileLogger?.LogEvent("MODE_CHANGED", ("mode", ModeStore.Format(mode)));
+                    Dispatcher.BeginInvoke(new Action(UpdateTrayMode));
+                };
+
+                _fileLogger.LogEvent("APP_STARTED", ("mode", ModeStore.Format(_modes.Mode)));
             }
             catch (Exception ex)
             {
@@ -83,12 +108,22 @@ namespace ClaudeModelPicker
             }
         }
 
+        private static int RunSelect(string? requested)
+        {
+            var model = ModelNames.Families.FirstOrDefault(f =>
+                string.Equals(f, requested, StringComparison.OrdinalIgnoreCase));
+            if (model == null) return SelectBadArgs;
+
+            using var logger = new FileLogger();
+            using var flaUi = new ClaudeMonitorService(logger);
+            var ok = flaUi.TryClickModelDropdownViaFlaUI(model);
+            logger.LogSelection(model, "manual-select", ok);
+            return ok ? SelectOk : SelectFailed;
+        }
+
         /// <summary>
-        /// Minimal system-tray presence: icon + right-click "Exit". The
-        /// original HANDOFF-SONNET.md "Missing Features" list asked for a
-        /// tray icon; MainWindow previously just hid itself with no tray
-        /// presence at all, so there was no way to see the app was running
-        /// or to quit it short of Task Manager.
+        /// Tray icon: Active / Passive mode and Exit. Passive lets every Enter
+        /// through untouched; the same switch is in ClaudeUsageMonitor's window.
         /// </summary>
         private void SetupTrayIcon()
         {
@@ -97,19 +132,34 @@ namespace ClaudeModelPicker
                 _trayIcon = new Forms.NotifyIcon
                 {
                     Icon = System.Drawing.SystemIcons.Application,
-                    Visible = true,
-                    Text = "Claude Model Picker"
+                    Visible = true
                 };
 
                 var menu = new Forms.ContextMenuStrip();
+                _activeItem = new Forms.ToolStripMenuItem("Active: pick a model on Enter");
+                _activeItem.Click += (_, _) => _modes?.Set(PickerMode.Active);
+                _passiveItem = new Forms.ToolStripMenuItem("Passive: Enter sends as normal");
+                _passiveItem.Click += (_, _) => _modes?.Set(PickerMode.Passive);
+                menu.Items.Add(_activeItem);
+                menu.Items.Add(_passiveItem);
+                menu.Items.Add(new Forms.ToolStripSeparator());
                 menu.Items.Add("Exit", null, (_, _) => Shutdown());
                 _trayIcon.ContextMenuStrip = menu;
+                UpdateTrayMode();
             }
             catch (Exception ex)
             {
                 // Tray icon is a convenience, not a dependency — app keeps running headless if this fails.
                 _fileLogger?.LogError("App.SetupTrayIcon", ex);
             }
+        }
+
+        private void UpdateTrayMode()
+        {
+            var passive = _modes?.Mode == PickerMode.Passive;
+            if (_activeItem != null) _activeItem.Checked = !passive;
+            if (_passiveItem != null) _passiveItem.Checked = passive;
+            if (_trayIcon != null) _trayIcon.Text = passive ? "Claude Model Picker (passive)" : "Claude Model Picker (active)";
         }
 
         private void CheckIdle()
@@ -126,10 +176,11 @@ namespace ClaudeModelPicker
         protected override void OnExit(ExitEventArgs e)
         {
             _idleTimer?.Stop();
-            _fileLogger?.LogEvent("APP_EXITING");
+            if (_hookService != null) _fileLogger?.LogEvent("APP_EXITING");
             _hookService?.Stop();
             _flaUiFallback?.Dispose();
             _configManager?.Dispose();
+            _modes?.Dispose();
             _trayIcon?.Dispose();
             _fileLogger?.Dispose();
             base.OnExit(e);

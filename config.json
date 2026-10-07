@@ -66,11 +66,6 @@
         "enabled": true,
         "restoreClipboard": true
       },
-      "keyboard": {
-        "enabled": false,
-        "tabCount": 5,
-        "timeoutMs": 2000
-      },
       "flaui": {
         "enabled": true
       }

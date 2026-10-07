@@ -151,7 +151,6 @@ namespace ClaudeModelPicker.Tests
         public void MissingConfig_UsesSafeDefaults()
         {
             using var config = new ConfigManager("does-not-exist.json");
-            Assert.False(config.KeyboardEnabled);   // Tab walk must never come back by accident
             Assert.False(config.FlaUIEnabled);
             Assert.True(config.ClipboardEnabled);
             Assert.Equal(1500, config.AnalysisOpusMinTokens);
@@ -167,7 +166,6 @@ namespace ClaudeModelPicker.Tests
             Assert.NotEmpty(config.AnalysisOpusKeywords);
             Assert.True(config.AnalysisHaikuMaxTokens < config.AnalysisSonnetMinTokens);
             Assert.True(config.AnalysisSonnetMinTokens < config.AnalysisOpusMinTokens);
-            Assert.False(config.KeyboardEnabled);
         }
     }
 }

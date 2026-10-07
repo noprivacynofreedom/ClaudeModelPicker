@@ -3,31 +3,29 @@ using System;
 namespace ClaudeModelPicker.Services
 {
     /// <summary>
-    /// Single entry point for "read the prompt" and "pick the model" — tries
-    /// the clipboard/keyboard-nav path first (works on Electron), falls back
-    /// to FlaUI UI Automation (legacy, likely broken on Electron — see
-    /// ClaudeMonitorService's doc comment) if that's disabled or fails.
-    /// Method choice for both reading and selecting is logged so a returning
-    /// developer can tell which path actually fired in practice.
+    /// Single entry point for "read the prompt" and "pick the model".
+    /// Reading: clipboard first (works on Electron), FlaUI as fallback.
+    /// Picking: FlaUI UI Automation only (ExpandCollapse + Invoke). The old
+    /// Tab-walk keyboard selector was removed: on the real app it tabbed
+    /// across the UI instead of opening the model menu.
+    /// Method choice is logged so the log shows which path actually fired.
     /// </summary>
     public class InputMethodManager
     {
         private readonly ClipboardInputReader _clipboardReader;
-        private readonly KeyboardModelSelector _keyboardSelector;
-        private readonly ClaudeMonitorService _flaUiFallback;
+        private readonly ClaudeMonitorService _flaUi;
         private readonly ConfigManager _config;
         private readonly FileLogger? _logger;
 
         public InputMethodManager(
-            ClaudeMonitorService flaUiFallback,
+            ClaudeMonitorService flaUi,
             ConfigManager config,
             FileLogger? logger = null)
         {
-            _flaUiFallback = flaUiFallback;
+            _flaUi = flaUi;
             _config = config;
             _logger = logger;
             _clipboardReader = new ClipboardInputReader(logger);
-            _keyboardSelector = new KeyboardModelSelector(logger, config.KeyboardTabCount);
         }
 
         public string ReadPrompt()
@@ -44,7 +42,7 @@ namespace ClaudeModelPicker.Services
 
             if (_config.FlaUIEnabled)
             {
-                var prompt = _flaUiFallback.ReadClaudeInputFieldViaFlaUI();
+                var prompt = _flaUi.ReadClaudeInputFieldViaFlaUI();
                 _logger?.LogSelection("n/a", "flaui-read", !string.IsNullOrEmpty(prompt));
                 return prompt;
             }
@@ -54,18 +52,9 @@ namespace ClaudeModelPicker.Services
 
         public bool SelectModel(string model)
         {
-            if (_config.KeyboardEnabled)
-            {
-                if (_keyboardSelector.SelectModelViaKeyboard(model))
-                {
-                    _logger?.LogSelection(model, "keyboard-nav", true);
-                    return true;
-                }
-            }
-
             if (_config.FlaUIEnabled)
             {
-                var ok = _flaUiFallback.TryClickModelDropdownViaFlaUI(model);
+                var ok = _flaUi.TryClickModelDropdownViaFlaUI(model);
                 _logger?.LogSelection(model, "flaui-click", ok);
                 if (ok) return true;
             }

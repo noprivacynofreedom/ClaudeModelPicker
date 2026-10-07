@@ -88,9 +88,6 @@ namespace ClaudeModelPicker.Services
         public bool ClipboardEnabled => GetBool("modelSelection.methods.clipboard.enabled", true);
         public bool ClipboardRestoreContent => GetBool("modelSelection.methods.clipboard.restoreClipboard", true);
 
-        public bool KeyboardEnabled => GetBool("modelSelection.methods.keyboard.enabled", false);
-        public int KeyboardTabCount => GetInt("modelSelection.methods.keyboard.tabCount", 5);
-        public int KeyboardTimeoutMs => GetInt("modelSelection.methods.keyboard.timeoutMs", 2000);
 
         public bool FlaUIEnabled => GetBool("modelSelection.methods.flaui.enabled", false);
 
