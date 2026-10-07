@@ -1,7 +1,7 @@
 <Window x:Class="ClaudeModelPicker.ModelPickDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Model Recommendation" Height="200" Width="400"
+        Title="Model Recommendation" Height="200" Width="460"
         WindowStartupLocation="CenterScreen"
         Background="#F5F5F5"
         FontFamily="Segoe UI"
@@ -13,6 +13,7 @@
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                 <Button x:Name="HaikuButton" Content="Use Haiku" Padding="15,8" Margin="0,0,10,0" Click="OnHaikuClick" Background="#4CAF50" Foreground="White" />
                 <Button x:Name="SonnetButton" Content="Use Sonnet" Padding="15,8" Margin="0,0,10,0" Click="OnSonnetClick" Background="#2196F3" Foreground="White" />
+                <Button x:Name="OpusButton" Content="Use Opus" Padding="15,8" Margin="0,0,10,0" Click="OnOpusClick" Background="#7E57C2" Foreground="White" />
                 <Button x:Name="SkipButton" Content="Skip" Padding="15,8" Click="OnSkipClick" Background="#999" Foreground="White" />
             </StackPanel>
         </StackPanel>

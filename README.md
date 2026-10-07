@@ -1,6 +1,6 @@
 # Claude Model Picker
 
-Auto-picks and switches Claude models (Haiku vs Sonnet) based on your prompt, right in Claude Desktop.
+Auto-picks and switches Claude models (Haiku, Sonnet or Opus) based on your prompt, right in Claude Desktop.
 
 ## What it does
 
@@ -60,6 +60,8 @@ When you press **Enter** in Claude Desktop:
 ### Model Picking Logic
 - **Haiku** (fast): <150 tokens, simple tasks (summarize, list, extract, facts)
 - **Sonnet** (powerful): >300 tokens, complex tasks (analyze, design, debug, reason)
+- **Opus** (deepest): >1500 tokens, or thorough/in-depth/audit/research work
+- Keywords match whole words only ("refactor" no longer hits "fact"). Ties go to the cheaper model.
 - **Uncertain** (50-80%): shows popup for manual choice
 
 ### Fallback Behavior

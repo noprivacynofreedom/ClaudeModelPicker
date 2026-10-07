@@ -8,7 +8,8 @@
   "analysis": {
     "tokenCountThreshold": {
       "haikuMax": 150,
-      "sonnetMin": 300
+      "sonnetMin": 300,
+      "opusMin": 1500
     },
     "keywords": {
       "haiku": [
@@ -33,6 +34,21 @@
         "architecture",
         "refactor",
         "optimize"
+      ],
+      "opus": [
+        "in-depth",
+        "in depth",
+        "thorough",
+        "comprehensive",
+        "research",
+        "strategy",
+        "audit",
+        "prove",
+        "proof",
+        "end-to-end",
+        "migration",
+        "security review",
+        "deep dive"
       ]
     },
     "scoringWeights": {
@@ -62,7 +78,7 @@
     "popup": {
       "showConfirmation": true,
       "autoAcceptConfidence": 0.85,
-      "timeoutMs": 5000
+      "timeoutMs": 8000
     }
   },
   "keyboard": {

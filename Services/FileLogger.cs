@@ -14,8 +14,8 @@ namespace ClaudeModelPicker.Services
     {
         private readonly string _logDirectory;
         private readonly object _lockObj = new();
-        private StreamWriter _currentWriter;
-        private string _currentLogFile;
+        private StreamWriter? _currentWriter;
+        private string? _currentLogFile;
 
         public FileLogger()
         {
@@ -172,7 +172,12 @@ namespace ClaudeModelPicker.Services
                     var cutoffDate = DateTime.Now.AddDays(-daysToKeep);
                     foreach (var file in Directory.GetFiles(_logDirectory, "*.log"))
                     {
-                        var fileDate = File.GetCreationTime(file);
+                        // Name is yyyy-MM-dd.log. Creation time changes when a file is copied, so prefer the name.
+                        var fileDate = DateTime.TryParseExact(Path.GetFileNameWithoutExtension(file), "yyyy-MM-dd",
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            System.Globalization.DateTimeStyles.None, out var named)
+                            ? named
+                            : File.GetCreationTime(file);
                         if (fileDate < cutoffDate)
                             File.Delete(file);
                     }

@@ -293,7 +293,7 @@ namespace ClaudeModelPicker.Services
         /// ModelPickDialog is a WPF Window — it must be shown on the UI
         /// thread, not the background Task this method is called from.
         /// </summary>
-        /// <returns>"Haiku" or "Sonnet" if a button was clicked, null for Skip or close.</returns>
+        /// <returns>"Haiku", "Sonnet" or "Opus" if a button was clicked, null for Skip, close or timeout.</returns>
         private string? ShowPopupOnUiThread(ModelPick pick)
         {
             string? chosen = null;
@@ -301,7 +301,7 @@ namespace ClaudeModelPicker.Services
             {
                 Application.Current?.Dispatcher.Invoke(() =>
                 {
-                    var dialog = new ModelPickDialog(pick);
+                    var dialog = new ModelPickDialog(pick, _config.PopupTimeoutMs);
                     dialog.ShowDialog();
                     chosen = dialog.GetSelectedModel();
                 });

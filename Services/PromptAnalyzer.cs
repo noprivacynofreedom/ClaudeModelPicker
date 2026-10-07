@@ -7,7 +7,7 @@ using System.Text.RegularExpressions;
 namespace ClaudeModelPicker.Services
 {
     /// <summary>
-    /// Scores a prompt and recommends Haiku or Sonnet, based on token count
+    /// Scores a prompt and recommends Haiku, Sonnet or Opus, based on token count
     /// and keyword matches. All thresholds/keywords come from ConfigManager
     /// (config.json) rather than being hardcoded, so tuning doesn't require
     /// a rebuild.
@@ -50,41 +50,42 @@ namespace ClaudeModelPicker.Services
             return sanitized;
         }
 
-        public ModelPick Analyze(string prompt)
+        public ModelPick Analyze(string? prompt)
         {
             try
             {
+                prompt ??= string.Empty;
                 var tokenCount = CountTokens(prompt);
-                var haikuKeywords = _config.AnalysisHaikuKeywords;
-                var sonnetKeywords = _config.AnalysisSonnetKeywords;
+                var tokenWeight = _config.AnalysisTokenCountWeight;
+                var keywordWeight = _config.AnalysisKeywordsWeight;
 
-                var hasHaikuKeywords = HasKeywords(prompt, haikuKeywords);
-                var hasSonnetKeywords = HasKeywords(prompt, sonnetKeywords);
-
-                double sonnetScore = 0;
-                double haikuScore = 0;
+                // Index order = ModelNames.Families: Haiku, Sonnet, Opus.
+                var scores = new double[3];
 
                 if (tokenCount < _config.AnalysisHaikuMaxTokens)
-                    haikuScore += _config.AnalysisTokenCountWeight;
-                if (tokenCount > _config.AnalysisSonnetMinTokens)
-                    sonnetScore += _config.AnalysisTokenCountWeight;
+                    scores[0] += tokenWeight;
+                else if (tokenCount > _config.AnalysisOpusMinTokens)
+                    scores[2] += tokenWeight;
+                else if (tokenCount > _config.AnalysisSonnetMinTokens)
+                    scores[1] += tokenWeight;
 
-                if (hasSonnetKeywords)
-                    sonnetScore += _config.AnalysisKeywordsWeight;
-                if (hasHaikuKeywords)
-                    haikuScore += _config.AnalysisKeywordsWeight;
+                if (HasKeywords(prompt, _config.AnalysisHaikuKeywords)) scores[0] += keywordWeight;
+                if (HasKeywords(prompt, _config.AnalysisSonnetKeywords)) scores[1] += keywordWeight;
+                if (HasKeywords(prompt, _config.AnalysisOpusKeywords)) scores[2] += keywordWeight;
 
-                var total = sonnetScore + haikuScore;
+                var total = scores.Sum();
                 if (total == 0)
                 {
                     return new ModelPick { PickedModel = "Haiku", Confidence = 0.5, TokenCount = tokenCount };
                 }
 
-                sonnetScore /= total;
-                haikuScore /= total;
+                // Strict ">" so a tie goes to the smaller (cheaper) model.
+                var best = 0;
+                for (var i = 1; i < scores.Length; i++)
+                    if (scores[i] > scores[best]) best = i;
 
-                var picked = sonnetScore > haikuScore ? "Sonnet" : "Haiku";
-                var confidence = Math.Max(sonnetScore, haikuScore);
+                var picked = ModelNames.Families[best];
+                var confidence = scores[best] / total;
 
                 return new ModelPick
                 {
@@ -112,11 +113,16 @@ namespace ClaudeModelPicker.Services
             }
         }
 
-        private static bool HasKeywords(string text, string[] keywords)
+        /// <summary>
+        /// Whole-word, case-insensitive keyword match. Plain substring matching
+        /// made "refactor" hit the Haiku keyword "fact" and "listen" hit "list".
+        /// Simple plural/past forms still match ("lists", "summarized").
+        /// </summary>
+        public static bool HasKeywords(string text, string[] keywords)
         {
-            if (keywords.Length == 0) return false;
-            var lower = text.ToLowerInvariant();
-            return keywords.Any(kw => lower.Contains(kw.ToLowerInvariant()));
+            if (keywords.Length == 0 || string.IsNullOrEmpty(text)) return false;
+            return keywords.Any(kw => !string.IsNullOrWhiteSpace(kw) &&
+                Regex.IsMatch(text, @"(?<!\w)" + Regex.Escape(kw.Trim()) + @"(s|es|d|ed)?(?!\w)", RegexOptions.IgnoreCase));
         }
     }
 }

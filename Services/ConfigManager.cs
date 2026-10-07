@@ -15,7 +15,7 @@ namespace ClaudeModelPicker.Services
         private JObject _config;
         private FileSystemWatcher? _watcher;
 
-        public event EventHandler ConfigReloaded;
+        public event EventHandler? ConfigReloaded;
 
         public ConfigManager(string configFileName = "config.json")
         {
@@ -71,36 +71,11 @@ namespace ClaudeModelPicker.Services
         // Analysis thresholds
         public int AnalysisHaikuMaxTokens => GetInt("analysis.tokenCountThreshold.haikuMax", 150);
         public int AnalysisSonnetMinTokens => GetInt("analysis.tokenCountThreshold.sonnetMin", 300);
+        public int AnalysisOpusMinTokens => GetInt("analysis.tokenCountThreshold.opusMin", 1500);
 
-        /// <summary>
-        /// Get haiku keywords from config.
-        /// </summary>
-        public string[] AnalysisHaikuKeywords
-        {
-            get
-            {
-                var tokens = _config?["analysis"]?["keywords"]?["haiku"];
-                if (tokens == null)
-                    return Array.Empty<string>();
-
-                return tokens.Values<string>().ToArray();
-            }
-        }
-
-        /// <summary>
-        /// Get sonnet keywords from config.
-        /// </summary>
-        public string[] AnalysisSonnetKeywords
-        {
-            get
-            {
-                var tokens = _config?["analysis"]?["keywords"]?["sonnet"];
-                if (tokens == null)
-                    return Array.Empty<string>();
-
-                return tokens.Values<string>().ToArray();
-            }
-        }
+        public string[] AnalysisHaikuKeywords => GetStrings("analysis.keywords.haiku");
+        public string[] AnalysisSonnetKeywords => GetStrings("analysis.keywords.sonnet");
+        public string[] AnalysisOpusKeywords => GetStrings("analysis.keywords.opus");
 
         public double AnalysisConfidenceThreshold => GetDouble("analysis.confidenceThreshold", 0.6);
         public double AnalysisTokenCountWeight => GetDouble("analysis.scoringWeights.tokenCount", 0.4);
@@ -176,6 +151,23 @@ namespace ClaudeModelPicker.Services
             }
         }
 
+        private string[] GetStrings(string path)
+        {
+            try
+            {
+                var token = _config.SelectToken(path);
+                if (token == null) return Array.Empty<string>();
+                return token.Values<string>()
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Select(s => s!)
+                    .ToArray();
+            }
+            catch
+            {
+                return Array.Empty<string>();
+            }
+        }
+
         private string GetString(string path, string defaultValue)
         {
             try
@@ -195,7 +187,7 @@ namespace ClaudeModelPicker.Services
         {
             try
             {
-                _watcher = new FileSystemWatcher(Path.GetDirectoryName(_configPath))
+                _watcher = new FileSystemWatcher(Path.GetDirectoryName(_configPath) ?? AppContext.BaseDirectory)
                 {
                     Filter = Path.GetFileName(_configPath),
                     NotifyFilter = NotifyFilters.LastWrite
